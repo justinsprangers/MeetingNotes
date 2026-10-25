@@ -28,7 +28,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - A summarizer, one of:
   - **Claude API:** a key from [console.anthropic.com](https://console.anthropic.com/). This is pay-as-you-go, billed separately from a Claude Pro/Max subscription.
   - **Claude.ai:** no setup. Use the **Copy for Claude.ai** button with your existing Claude account (free or paid).
-  - **Ollama:** free, from [ollama.com](https://ollama.com/). Install and start it, then in the app's Settings click **Download** next to the recommended model: `gemma4:12b` (7.7 GB) on computers with an 8 GB+ GPU or 16 GB+ RAM, otherwise `qwen3.5:4b` (3.3 GB).
+  - **Ollama:** free, from [ollama.com](https://ollama.com/). Install and start it, then in the app's Settings click **Download** next to the recommended model: `gemma4:12b` (7.7 GB) on computers with a 12 GB+ GPU, otherwise `qwen3.5:4b` (3.3 GB).
 
 ## Install and run
 
@@ -66,8 +66,8 @@ Memory is stored in `memory.json` next to the app. Changes apply from the next n
 Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop RTX 4060 (8 GB):
 
 - **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
-- **Speed:** about 45–90 seconds per answer. The 7.7 GB model doesn't quite fit in an 8 GB GPU, so part of it runs on the CPU. A GPU with 12 GB or more is much faster.
-- Longer meetings haven't been tested yet.
+- **Speed:** about 45–90 seconds per answer on that short meeting, and about 6.5 minutes for the first answer on a real 57-minute meeting. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM. On 8 GB cards use `qwen3.5:4b` instead, or Copy for Claude.ai for long meetings.
+- Before an Ollama request, the app unloads Whisper from the GPU to make room (it reloads on the next transcription). Ollama frees the model's memory 2 minutes after the last request.
 
 To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and compare its output with `eval/answer_key.md`.
 
@@ -98,6 +98,8 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | Ollama says it can't connect | Start Ollama, then download a model from Settings (or run `ollama pull gemma4:12b`) and pick it. |
 | Ollama is very slow | The model is too big for your GPU. Pick a smaller one, e.g. `qwen3.5:4b`. |
 | Names and terms come out wrong | Put them in Meeting context. |
+| The transcript repeats one word over and over | Whisper sometimes loops on silence or noise. The app now drops repeated and low-confidence lines and stops feeding them back to Whisper. Check the mic level if it keeps happening. |
+| Notes name the wrong person | The transcript has no speaker names, so the summarizer only names someone when the words show who it was, and writes "[owner unclear]" otherwise. Say names out loud ("Ben, can you order the motors?"). On calls with system audio on, lines are labeled **Me** (your mic) or **Others** (the call). |
 | Port 8806 is in use | Change `PORT` in `config.py`. |
 
 ## How it works (for tinkering)

@@ -17,6 +17,9 @@ Local web app: record/upload/paste a meeting → local Whisper transcript → no
 - Recommended Ollama models live in `RECOMMENDED_MODELS` (summarizer.py), chosen by GPU memory (nvidia-smi) or RAM. Checked against ollama.com on 2026-10-24; re-check when updating.
 - Recording: mic via sounddevice; system audio via PyAudioWPatch WASAPI loopback (Windows only). Sources are aligned by wall clock in `_mix_once` because loopback delivers nothing during silence. Chunks are cut at the quietest 0.3 s in the last 5 s.
 - Transcription jobs run one at a time on a single worker thread so the transcript stays in order. `Meeting.whisper_prompt()` passes context + transcript tail as Whisper's `initial_prompt`.
+- Loop guard (a real 57-min meeting looped "Adioshi." for 20 min, because the looped tail went back in as the prompt): `condition_on_previous_text=False`, `collapse_repeats`, `_hallucinated` drops segments by compression ratio / no-speech, `add_segment` skips a line identical to the previous one, and `whisper_prompt` drops a low-diversity tail.
+- Speaker labels: the recorder keeps per-source tracks per chunk; once system audio has been active `CALL_SECONDS`, `app.speaker` labels segments "Others" (system audio active) or "Me" (mic only). Uploads and mic-only recordings get no labels. The system prompt forbids guessing speakers.
+- `/api/ask` with Ollama calls `transcriber.unload()` when idle (Whisper large-v3-turbo holds ~2 GB VRAM). Ollama requests send `keep_alive` `KEEP_ALIVE`.
 - Never call `Recorder.stop()` while holding `lock`: it flushes a final chunk whose callback takes the lock.
 
 ## Gotchas

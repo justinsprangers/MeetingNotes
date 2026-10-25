@@ -12,13 +12,14 @@ import threading
 import webbrowser
 from datetime import datetime
 
+import numpy as np
 from flask import Flask, Response, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 import config
 import memory
 import summarizer
-from recorder import Recorder, system_audio_supported
+from recorder import ACTIVE_LEVEL, RATE, Recorder, system_audio_supported
 from transcriber import Transcriber
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
@@ -31,6 +32,8 @@ SAVED_FIELDS = ("title", "context", "transcript", "history", "sent_transcript", 
                 "system", "extractions", "language", "audio_seconds")
 # Marks a progress note inside the streamed reply; the page shows it and drops it from the text.
 STATUS_START, STATUS_END = "\x01", "\x02"
+# "[12:34] " plus an optional "Me: "/"Others: " speaker label.
+LINE_PREFIX = re.compile(r"^\[[\d:]+\] (?:(?:Me|Others): )?", re.M)
 
 
 class Meeting:
@@ -83,30 +86,50 @@ class Meeting:
     def whisper_prompt(self):
         # Whisper only reads the last ~220 tokens of a prompt, so keep it short:
         # glossary and context (names, jargon), then the end of the transcript so far.
-        recent = re.sub(r"^\[[\d:]+\] ", "", self.transcript[-400:], flags=re.M).replace("\n", " ")
+        recent = LINE_PREFIX.sub("", self.transcript[-400:]).replace("\n", " ")
+        words = recent.lower().split()
+        if len(words) >= 10 and len(set(words)) < len(words) / 3:
+            recent = ""  # repetitive tail: passing it on would teach Whisper to keep repeating
         terms = memory.whisper_terms(memory.load())
         return f"{terms} {self.context.strip()[:300]} {recent}".strip()
 
-    def add_segment(self, start, text):
-        line = f"[{int(start // 60):02d}:{int(start % 60):02d}] {text}"
+    def add_segment(self, start, text, speaker=None):
+        last = self.transcript.rsplit("\n", 1)[-1]
+        if LINE_PREFIX.sub("", last).lower() == text.lower():
+            return  # the same line again is almost always Whisper repeating itself
+        label = f"{speaker}: " if speaker else ""
+        line = f"[{int(start // 60):02d}:{int(start % 60):02d}] {label}{text}"
         self.transcript += ("\n" if self.transcript else "") + line
 
 
 current = Meeting.new()
 
 
+def speaker(tracks, start, end):
+    """On a call, system audio is the other people and the mic is you."""
+    if not tracks:
+        return None
+    a, b = int(start * RATE), max(int(end * RATE), int(start * RATE) + 1)
+    level = {name: float(np.sqrt(np.mean(t[a:b] ** 2))) if len(t[a:b]) else 0.0 for name, t in tracks.items()}
+    if level.get("System audio", 0) > ACTIVE_LEVEL:
+        return "Others"
+    if level.get("Microphone", 0) > ACTIVE_LEVEL:
+        return "Me"
+    return None
+
+
 def worker():
     """Transcribes queued audio one job at a time so the transcript stays in order."""
     while True:
-        meeting, source, offset, is_file = jobs.get()
+        meeting, source, offset, is_file, tracks = jobs.get()
         settings = config.load()
         language = None if settings["language"] == "auto" else settings["language"]
         with lock:
             prompt = meeting.whisper_prompt()
         try:
-            def on_segment(start, text):
+            def on_segment(start, end, text):
                 with lock:
-                    meeting.add_segment(start, text)
+                    meeting.add_segment(start, text, speaker(tracks, start - offset, end - offset))
             lang, duration = transcriber.transcribe(
                 source, settings, offset, language or meeting.language, on_segment, prompt)
             with lock:
@@ -223,10 +246,10 @@ def record_start():
         n = len(list(m.folder.glob("recording-*.wav"))) + 1
         base = m.audio_seconds
 
-        def on_chunk(audio, offset):
+        def on_chunk(audio, offset, tracks):
             with lock:
                 m.pending += 1
-            jobs.put((m, audio, base + offset, False))
+            jobs.put((m, audio, base + offset, False, tracks))
 
         rec = Recorder(m.folder / f"recording-{n}.wav", on_chunk,
                        use_mic=settings["record_microphone"], use_system=settings["record_system_audio"])
@@ -267,7 +290,7 @@ def upload():
         f.save(path)
         m.pending += 1
         m.error = ""
-        jobs.put((m, str(path), m.audio_seconds, True))
+        jobs.put((m, str(path), m.audio_seconds, True, None))
     return jsonify(ok=True)
 
 
@@ -294,6 +317,10 @@ def ask():
         system = m.system or live_system
 
     if settings["provider"] == "ollama":
+        with lock:
+            idle = not (m.recorder or m.pending)
+        if idle:
+            transcriber.unload()  # Whisper holds ~2 GB of GPU memory that Ollama can use
         source = summarizer.ollama_answer(settings, live_system, history, request_text,
                                           transcript, context, m.extractions, mem["glossary"])
     else:

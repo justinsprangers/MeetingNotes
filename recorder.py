@@ -21,6 +21,8 @@ except ImportError:
 RATE = 16000          # Whisper's sample rate
 CHUNK_SECONDS = 30    # how much audio to collect before sending it to Whisper
 MIX_INTERVAL = 0.5
+ACTIVE_LEVEL = 0.003  # RMS above this counts as sound (loopback is exactly 0 when nothing plays)
+CALL_SECONDS = 10     # system audio heard this long = a call, so speaker labels make sense
 
 
 def system_audio_supported() -> bool:
@@ -70,7 +72,11 @@ def _quiet_split(audio: np.ndarray) -> int:
 
 class Recorder:
     def __init__(self, wav_path, on_chunk, use_mic=True, use_system=True):
-        """on_chunk(audio, offset_seconds) is called from a background thread."""
+        """on_chunk(audio, offset_seconds, tracks) is called from a background thread.
+
+        tracks is {"Microphone": audio, "System audio": audio} aligned with the
+        chunk when both are recorded and a call has been heard, else None.
+        """
         self.wav_path = wav_path
         self.on_chunk = on_chunk
         self.use_mic = use_mic
@@ -81,6 +87,8 @@ class Recorder:
         self._pa = None
         self._pending = []
         self._pending_len = 0
+        self._tracks = {}          # per-source audio for the pending chunk
+        self._system_seconds = 0.0
         self._chunk_offset = 0.0
         self._running = False
         self._thread = None
@@ -147,8 +155,11 @@ class Recorder:
         if n == 0:
             return
         mix = np.zeros(n, np.float32)
-        for p in parts:
+        for s, p in zip(self.sources, parts):
             mix[:len(p)] += p
+            self._tracks.setdefault(s.name, []).append(np.pad(p, (0, n - len(p))))
+            if s.name == "System audio" and s.level > ACTIVE_LEVEL:
+                self._system_seconds += n / RATE
         np.clip(mix, -1.0, 1.0, out=mix)
         self._wav.writeframes((mix * 32767).astype(np.int16).tobytes())
         self.seconds += n / RATE
@@ -156,14 +167,17 @@ class Recorder:
         self._pending_len += n
         if self._pending_len >= CHUNK_SECONDS * RATE:
             audio = np.concatenate(self._pending)
+            tracks = {name: np.concatenate(t) for name, t in self._tracks.items()}
             cut = _quiet_split(audio)
-            self._emit(audio[:cut])
+            self._emit(audio[:cut], {name: t[:cut] for name, t in tracks.items()})
             rest = audio[cut:]
             self._pending, self._pending_len = [rest], len(rest)
+            self._tracks = {name: [t[cut:]] for name, t in tracks.items()}
 
-    def _emit(self, audio: np.ndarray):
+    def _emit(self, audio: np.ndarray, tracks: dict):
         if len(audio):
-            self.on_chunk(audio, self._chunk_offset)
+            labeled = len(tracks) == 2 and self._system_seconds >= CALL_SECONDS
+            self.on_chunk(audio, self._chunk_offset, tracks if labeled else None)
             self._chunk_offset += len(audio) / RATE
 
     def levels(self) -> dict:
@@ -176,8 +190,9 @@ class Recorder:
         self._close_streams()
         self._mix_once()
         if self._pending:
-            self._emit(np.concatenate(self._pending))
-            self._pending, self._pending_len = [], 0
+            self._emit(np.concatenate(self._pending),
+                       {name: np.concatenate(t) for name, t in self._tracks.items()})
+            self._pending, self._pending_len, self._tracks = [], 0, {}
         if self._wav:
             self._wav.close()
 

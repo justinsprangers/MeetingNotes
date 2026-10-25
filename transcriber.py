@@ -1,5 +1,7 @@
 """Local speech-to-text with faster-whisper. Audio never leaves the computer."""
+import gc
 import os
+import re
 import sys
 import threading
 from pathlib import Path
@@ -24,6 +26,22 @@ _add_cuda_dlls()
 from faster_whisper import WhisperModel  # noqa: E402  (must come after the DLL setup)
 
 DEFAULT_MODEL = {"cuda": "large-v3-turbo", "cpu": "small"}
+
+# A word or short phrase said 3+ times in a row ("Adioshi. Adioshi. Adioshi.").
+_REPEAT = re.compile(r"\b((?:\S+\s*){1,4}?)(?:\1){2,}", re.I)
+
+
+def collapse_repeats(text):
+    """Whisper sometimes loops on one word over silence or noise. Keep one copy."""
+    prev = None
+    while prev != text:
+        prev, text = text, _REPEAT.sub(r"\1", text)
+    return text.strip()
+
+
+def _hallucinated(seg):
+    # Whisper's own warning signs: very repetitive text, or likely silence it filled in anyway.
+    return seg.compression_ratio > 2.4 or (seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0)
 
 
 class Transcriber:
@@ -61,15 +79,30 @@ class Transcriber:
 
         prompt: text Whisper treats as what came before (meeting context, the
         transcript so far). It helps with names, jargon, and punctuation.
-        Calls on_segment(start_seconds, text) as segments finish.
+        Calls on_segment(start_seconds, end_seconds, text) as segments finish.
         Returns (detected_language, duration_seconds).
         """
         with self._lock:
             self._load(settings)
+            # condition_on_previous_text=False: otherwise one looped segment primes
+            # the next one and the loop runs to the end of a long file.
             segments, info = self._model.transcribe(
-                audio, language=language, vad_filter=True, beam_size=5, initial_prompt=prompt or None)
+                audio, language=language, vad_filter=True, beam_size=5, initial_prompt=prompt or None,
+                condition_on_previous_text=False)
             for seg in segments:
-                text = seg.text.strip()
-                if text:
-                    on_segment(offset + seg.start, text)
+                text = collapse_repeats(seg.text)
+                if text and not _hallucinated(seg):
+                    on_segment(offset + seg.start, offset + seg.end, text)
             return info.language, info.duration
+
+    def unload(self):
+        """Free the GPU/RAM so a local summarizer model has room. Reloads on next use."""
+        if not self._lock.acquire(blocking=False):
+            return  # mid-transcription; leave it loaded
+        try:
+            if self._model is not None:
+                self._model = self._key = None
+                gc.collect()
+                self.info = "unloaded to make room for Ollama (reloads on next use)"
+        finally:
+            self._lock.release()
