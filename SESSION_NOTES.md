@@ -17,6 +17,7 @@
 - First real use: record a short call and try Copy for Claude.ai and Ollama.
 - Test Ollama on a real 30–60 min meeting; adjust `SINGLE_PASS_CHARS`/`SECTION_CHARS` if needed.
 - Push to a public GitHub repo.
+- After the user's testing: Windows installer (bundled Python, Start menu shortcut, GitHub Releases), reusing LaserEngraver's build setup. Keep run.bat. The user said to wait until they've tested it.
 - Ideas: speaker labels (mic = "me" vs system = "others"), export notes to .docx.
 
 ## Decisions & gotchas
