@@ -308,6 +308,17 @@ def ask():
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
+@app.post("/api/copy-prompt")
+def copy_prompt():
+    request_text = (request.get_json().get("request") or "").strip()
+    with lock:
+        try:
+            text = summarizer.copy_prompt(request_text, current.transcript, current.context)
+        except summarizer.SummarizerError as e:
+            return error(str(e))
+    return jsonify(text=text)
+
+
 @app.post("/api/settings")
 def save_settings():
     data = request.get_json()

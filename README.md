@@ -16,7 +16,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - **You choose what to get out of it:** type any request, or click a preset (meeting notes, update for someone absent, action items, decisions, Discord, email). Follow-ups work like a chat ("shorter", "add that we still need the resin order").
 - **Ask mid-meeting.** New transcript text is sent automatically with each request.
 - **Off the record:** say so in the meeting and that part is left out of the notes.
-- **Two summarizers:** Claude (best quality, uses your Anthropic API key) or Ollama (free, fully offline).
+- **Three ways to summarize:** Claude through the API (best quality, in the app, pay-per-use), Ollama (free, fully offline), or **Copy for Claude.ai** (no key: copies everything into a Claude.ai chat, covered by your Claude subscription).
 - **Everything is saved** per meeting: the audio, `transcript.txt`, and `notes.md` with every response. Reopen any meeting later and keep asking.
 
 ## Requirements
@@ -24,8 +24,9 @@ It runs as a small app in your browser. Nothing is hosted online.
 - **Windows 10/11.** Mac and Linux work too, but record the microphone only (no system audio); you can still upload a recording of the call.
 - **Python 3.10 or newer** from [python.org](https://www.python.org/downloads/). During install, tick **"Add python.exe to PATH"**.
 - About 2 GB of free disk space (more with GPU support).
-- A summarizer, either:
-  - **Claude:** an API key from [console.anthropic.com](https://console.anthropic.com/) (pay-as-you-go), or
+- A summarizer, one of:
+  - **Claude API:** a key from [console.anthropic.com](https://console.anthropic.com/). This is pay-as-you-go, billed separately from a Claude Pro/Max subscription.
+  - **Claude.ai:** no setup. Use the **Copy for Claude.ai** button with your existing Claude account (free or paid).
   - **Ollama:** free, from [ollama.com](https://ollama.com/). Then run `ollama pull llama3.1:8b` (or another model). A machine with 16 GB+ RAM or a GPU is recommended.
 
 ## Install and run
@@ -47,12 +48,15 @@ The first transcription downloads the Whisper model (about 0.5 GB on CPU, 1.6 GB
 3. **Ask** for what you want, or click a preset. You can ask while still recording.
 4. **Refine** with follow-ups. **Copy** on a response copies just the message when the response is a single code block (the Discord and email presets).
 
+**Without an API key:** type your request (or click a preset), then click **Copy for Claude.ai**. It copies the instructions, context, transcript and request as one message and opens Claude.ai: paste with Ctrl+V, send, and keep following up there. If the meeting is still going, copy again later to send the updated transcript in a new chat.
+
 Use **New meeting** for the next one and **Past meetings** to reopen old ones. The `?` button in the app has a short version of these steps.
 
 ## Cost and privacy
 
 - **Audio and transcription stay on your computer.**
-- **With Claude**, the transcript text is sent to Anthropic for each request. A one-hour meeting is roughly 12,000 tokens, so a request costs about 5–10 cents with the default model (Claude Opus 5.5). Follow-ups cost less because the transcript is cached. You can switch to a cheaper model in Settings (e.g. `claude-sonnet-5-5` or `claude-haiku-5-5`).
+- **With the Claude API**, the transcript text is sent to Anthropic for each request. A one-hour meeting is roughly 12,000 tokens, so a request costs about 5–10 cents with the default model (Claude Opus 5.5). Follow-ups cost less because the transcript is cached. You can switch to a cheaper model in Settings (e.g. `claude-sonnet-5-5` or `claude-haiku-5-5`). This is billed separately from any Claude subscription.
+- **With Copy for Claude.ai**, there's no API cost; it counts toward your normal Claude.ai usage limits. The transcript goes to Anthropic the same way as any chat.
 - **With Ollama**, nothing leaves your computer and it's free, but summaries are noticeably weaker than Claude's.
 - Your API key is stored in `settings.json` next to the app, on your computer only. The `.gitignore` keeps it and your `meetings/` folder out of git.
 

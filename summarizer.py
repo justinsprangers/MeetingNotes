@@ -49,6 +49,18 @@ def build_user_message(request_text, transcript, sent_transcript, context, sent_
     return "\n\n".join(parts)
 
 
+def copy_prompt(request_text, transcript, context):
+    """One self-contained message to paste into a Claude.ai chat (covered by a subscription, no API cost)."""
+    if not transcript.strip():
+        raise SummarizerError("There's no transcript yet. Record, upload audio, or paste a transcript first.")
+    parts = [SYSTEM_PROMPT]
+    if context.strip():
+        parts.append(f"<meeting_context>\n{context.strip()}\n</meeting_context>")
+    parts.append(f"<transcript>\n{transcript.strip()}\n</transcript>")
+    parts.append(request_text or "Reply with one line confirming you have the transcript, then wait for my request.")
+    return "\n\n".join(parts)
+
+
 def stream(settings, history, user_message):
     """Yields ("text", str) pieces, then ("raw", content) for Claude so it can be replayed later."""
     if settings["provider"] == "ollama":
@@ -81,7 +93,8 @@ def _claude(settings, history, user_message):
     except TypeError as e:
         if "authentication" not in str(e).lower():
             raise
-        raise SummarizerError("No Anthropic API key. Add one in Settings, or switch to Ollama.")
+        raise SummarizerError("No Anthropic API key. Add one in Settings, switch to Ollama, "
+                              "or use Copy for Claude.ai to use your Claude subscription instead.")
     except anthropic.AuthenticationError:
         raise SummarizerError("The Anthropic API key was rejected. Check it in Settings.")
     except anthropic.PermissionDeniedError:

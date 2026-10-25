@@ -1,7 +1,8 @@
 # Meeting Notes: session notes
 
 ## Status
-- v1 built: record (mic + Windows system audio), upload, or paste → live local Whisper transcript → chat-style requests with presets, Claude or Ollama, meetings saved and reopenable.
+- v1 built: record (mic + Windows system audio), upload, or paste → live local Whisper transcript → chat-style requests with presets, Claude API or Ollama, meetings saved and reopenable.
+- **Copy for Claude.ai** builds one message (system prompt + context + transcript + request), copies it, and opens claude.ai/new. This is the user's main no-cost path: the API is billed separately from their subscription.
 - Verified: file transcription (CPU small and GPU large-v3-turbo), recorder mixing/resampling/chunking (simulated input), settings, past meetings, every error path (no key, bad key, Ollama missing/unreachable).
 - **Not verified:** a real Claude response (no API key on the dev machine; the bad-key test reached the API and got a 401), Ollama responses, live system-audio capture end to end (the dev machine's speakers were muted), Mac/Linux.
 
@@ -16,4 +17,5 @@
 - Whisper auto: large-v3-turbo on CUDA, small on CPU.
 
 ## Log
+- 2026-10-24: Copy for Claude.ai button (uses the subscription, no API cost)
 - 2026-10-24: v1 built and tested; own git repo (MIT)

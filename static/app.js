@@ -257,6 +257,21 @@ PRESETS.forEach(([label, prompt]) => {
   $("presets").append(b);
 });
 
+// No API key needed: copy everything as one message and paste it into a Claude.ai chat.
+$("copy-claude").addEventListener("click", async () => {
+  const button = $("copy-claude");
+  try {
+    await saveNow();
+    const { text } = await api("/api/copy-prompt", { request: $("ask").value });
+    await navigator.clipboard.writeText(text);
+    window.open("https://claude.ai/new", "_blank");
+    button.textContent = "Copied: paste into Claude (Ctrl+V)";
+    setTimeout(() => (button.textContent = "Copy for Claude.ai"), 4000);
+  } catch (e) {
+    showError(e.message);
+  }
+});
+
 $("reset-chat").addEventListener("click", async () => {
   if (!confirm("Clear the chat for this meeting? The transcript is kept.")) return;
   await api("/api/reset-chat", {});

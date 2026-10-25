@@ -118,7 +118,8 @@ label { font-weight: 600; font-size: 14px; }
 .msg.assistant { border: 1px solid var(--border); position: relative; padding-top: 30px; }
 .msg .copy { position: absolute; top: 4px; right: 6px; font-size: 12px; padding: 2px 8px; }
 .ask { display: flex; flex-direction: column; gap: 6px; }
-.ask-actions { display: flex; justify-content: space-between; align-items: center; }
+.ask-actions { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ask-buttons { display: flex; gap: 8px; }
 
 dialog {
   border: 1px solid var(--border);

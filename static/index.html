@@ -44,7 +44,10 @@
       <textarea id="ask" rows="3" placeholder="What do you want from this meeting? (Ctrl+Enter to send)"></textarea>
       <div class="ask-actions">
         <button type="button" id="reset-chat" class="link">Reset chat</button>
-        <button type="submit" id="send" class="primary">Send</button>
+        <span class="ask-buttons">
+          <button type="button" id="copy-claude" title="Copies the transcript, context and your request, and opens Claude.ai. Uses your Claude subscription instead of API credits.">Copy for Claude.ai</button>
+          <button type="submit" id="send" class="primary">Send</button>
+        </span>
       </div>
     </form>
   </section>
@@ -65,7 +68,7 @@
       <label>API key <input type="password" name="anthropic_api_key" autocomplete="off" placeholder="sk-ant-…"></label>
       <div class="row"><span id="key-hint" class="hint"></span> <button type="button" id="clear-key" class="link">Remove saved key</button></div>
       <label>Model <input name="claude_model"></label>
-      <p class="hint">Get a key at console.anthropic.com. Leave blank to use the ANTHROPIC_API_KEY environment variable.</p>
+      <p class="hint">Get a key at console.anthropic.com. API use is billed separately from a Claude subscription; without a key, use Copy for Claude.ai instead. Leave blank to use the ANTHROPIC_API_KEY environment variable.</p>
     </fieldset>
 
     <fieldset id="ollama-fields">
@@ -122,6 +125,7 @@
       <li><b>Ask</b> for what you want, or click a preset. You can ask mid-meeting; new transcript text is sent automatically with each request.</li>
       <li><b>Refine</b> with follow-ups ("shorter", "for Discord", "no emojis").</li>
     </ol>
+    <p><b>No API key?</b> Type your request and click <b>Copy for Claude.ai</b>. It copies the transcript, context and request and opens Claude.ai: paste (Ctrl+V), send, and keep following up there. This uses your Claude subscription, not API credits.</p>
     <p>Everything is saved in the <code>meetings</code> folder: the audio, <code>transcript.txt</code>, and <code>notes.md</code> with every response. Reopen a meeting from <b>Past meetings</b>.</p>
     <p>Say "off the record" in the meeting and that part will be left out of the notes. Always get consent before recording people.</p>
     <div class="dialog-actions"><button class="primary">Close</button></div>
