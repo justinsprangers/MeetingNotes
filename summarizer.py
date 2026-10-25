@@ -36,10 +36,12 @@ CLAUDE_EFFORT = "medium"
 # in seconds because Ollama reuses the cached transcript prefix. Only transcripts too
 # long for MAX_CONTEXT are read in sections first (pass 1: extract the facts), then
 # answered from those notes (pass 2). Single passes near 32K tokens are untested.
-SINGLE_PASS_CHARS = 90000   # about 26,000 tokens (~90 min), leaving room for the answer in MAX_CONTEXT
+SINGLE_PASS_CHARS = 80000   # about 23,000 tokens (~80 min); with ANSWER_TOKENS it fits MAX_CONTEXT
 SECTION_CHARS = 12000       # about 3,000 tokens, roughly 10-15 minutes
 MAX_CONTEXT = 32768         # Ollama's default context is small enough to silently cut off input
 KEEP_ALIVE = "2m"           # long enough for a follow-up question, short enough to give the RAM back
+PREWARM_KEEP_ALIVE = "15m"  # after a pre-warm, wait longer for the first question
+ANSWER_TOKENS = 8192        # context room for the request, follow-ups and answers
 EXTRACT_PROMPT = """Below is section {i} of {n} of a meeting transcript. It comes from speech recognition, so expect misheard words; use the glossary and context to correct names and terms.
 
 Write compact notes of everything in this section that could matter later:
@@ -209,28 +211,60 @@ def ollama_answer(settings, system, history, request_text, transcript, context, 
                     + "\n\n".join(notes) + "\n</meeting_notes>")
         yield ("status", "Writing…")
 
-    first = "\n\n".join(p for p in (_context_block(context), material) if p)
+    first = _first_message(context, material)
     turns = [t["display"] for t in history] + [request_text]
     messages = [{"role": "system", "content": system}]
     for i, text in enumerate(turns):
         role = "user" if i % 2 == 0 else "assistant"
         messages.append({"role": role, "content": f"{first}\n\n{text}" if i == 0 else text})
-    yield from (("text", t) for t in _ollama_stream(settings, messages))
+    num_ctx = _prefix_context(system, first, sum(len(t) for t in turns))
+    yield from (("text", t) for t in _ollama_stream(settings, messages, num_ctx))
+
+
+def ollama_prewarm(settings, system, transcript, context):
+    """Have Ollama read the transcript now, so the first answer starts in seconds.
+
+    Ollama keeps the processed prompt and reuses the matching start of the next request.
+    That only works if this sends the same system prompt, the same first message up to
+    the end of the transcript, and the same num_ctx (a different one reloads the model).
+    """
+    if not settings["ollama_model"] or not transcript.strip() or len(transcript) > SINGLE_PASS_CHARS:
+        return
+    first = _first_message(context, f"<transcript>\n{transcript.strip()}\n</transcript>")
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": first}]
+    _ollama_post(settings, {"messages": messages, "keep_alive": PREWARM_KEEP_ALIVE},
+                 stream=False, num_ctx=_prefix_context(system, first), num_predict=1)
+
+
+def _first_message(context, material):
+    return "\n\n".join(p for p in (_context_block(context), material) if p)
+
+
+def _round_context(tokens):
+    return int(min(MAX_CONTEXT, max(8192, -(-tokens // 4096) * 4096)))
 
 
 def _context_size(messages):
     # Big enough for the input plus a long answer (~3.5 characters per token), in 4K steps.
-    tokens = sum(len(m["content"]) for m in messages) / 3.5 + 4096
-    return int(min(MAX_CONTEXT, max(8192, -(-tokens // 4096) * 4096)))
+    return _round_context(sum(len(m["content"]) for m in messages) / 3.5 + 4096)
 
 
-def _ollama_post(settings, body, stream):
+def _prefix_context(system, first, rest_chars=0):
+    # Sized from the transcript alone, with fixed room for requests, follow-ups and the
+    # answer, so it stays the same from the pre-warm through the first several requests.
+    return _round_context((len(system) + len(first)) / 3.5 + max(ANSWER_TOKENS, rest_chars / 3.5 + 4096))
+
+
+def _ollama_post(settings, body, stream, num_ctx=None, num_predict=None):
     url = settings["ollama_url"].rstrip("/") + "/api/chat"
+    options = {"num_ctx": num_ctx or _context_size(body["messages"])}
+    if num_predict is not None:
+        options["num_predict"] = num_predict
     # Thinking models (gemma4, qwen3.5) otherwise reason at length first: about 3x slower,
     # and the notes were just as good without it in testing.
     # keep_alive: free the model's memory soon after the last request instead of Ollama's 5 min.
     body = {"model": settings["ollama_model"], "stream": stream, "think": False, "keep_alive": KEEP_ALIVE,
-            "options": {"num_ctx": _context_size(body["messages"])}, **body}
+            "options": options, **body}
     try:
         r = requests.post(url, json=body, stream=stream, timeout=(5, 900))
         if r.status_code == 400 and "think" in r.text:  # model without a thinking switch
@@ -250,8 +284,8 @@ def _ollama_once(settings, messages):
     return data.get("message", {}).get("content", "")
 
 
-def _ollama_stream(settings, messages):
-    r = _ollama_post(settings, {"messages": messages}, stream=True)
+def _ollama_stream(settings, messages, num_ctx=None):
+    r = _ollama_post(settings, {"messages": messages}, stream=True, num_ctx=num_ctx)
     for line in r.iter_lines():
         if not line:
             continue

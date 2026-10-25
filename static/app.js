@@ -79,6 +79,7 @@ function render(s) {
   let status = "";
   if (s.pending > 0) status = `Transcribing… (${s.pending} part${s.pending > 1 ? "s" : ""} queued; Whisper: ${s.whisper})`;
   else if (s.recording) status = "Recording. The transcript fills in about every 30 seconds.";
+  else if (s.prewarm === "reading") status = "Ollama is reading the transcript so answers start fast (you can ask now; it'll wait for this).";
   if (silentPolls > 20) status += " No system audio so far. Windows records silence when the volume is muted or at 0.";
   $("status").textContent = status;
 

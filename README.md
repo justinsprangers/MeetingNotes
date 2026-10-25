@@ -66,7 +66,7 @@ Memory is stored in `memory.json` next to the app. Changes apply from the next n
 Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop RTX 4060 (8 GB):
 
 - **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
-- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, about 1–2 minutes for the first answer, and follow-ups start within seconds. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
+- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, answers start within about 4 seconds and full notes finish in about 2 minutes (you can read as they stream). That's because the app has Ollama read the transcript in the background as soon as a recording or upload finishes, or when you open a past meeting (about 40 seconds; the status line says so). Ask during that time and the answer just waits for it. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
 - **`qwen3.5:4b` is faster but not recommended for notes.** On the same meeting it made up owners, due dates, and decisions nobody made. gemma4:12b stuck to what was said.
 - Before an Ollama request, the app unloads Whisper from the GPU to make room (it reloads on the next transcription). Ollama frees the model's memory 2 minutes after the last request.
 
@@ -74,7 +74,7 @@ To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and 
 
 ## How Ollama handles long meetings
 
-Meetings up to about 90 minutes are read in one pass (on the 57-minute test meeting this was faster and more complete than two passes). Longer transcripts don't fit the model's memory, so the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
+Meetings up to about 80 minutes are read in one pass (on the 57-minute test meeting this was faster and more complete than two passes). Longer transcripts don't fit the model's memory, so the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
 
 Use **New meeting** for the next one and **Past meetings** to reopen old ones. The `?` button in the app has a short version of these steps.
 

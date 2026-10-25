@@ -3,7 +3,7 @@
 ## Status
 - Record (mic + Windows system audio), upload, or paste → live local Whisper transcript → chat-style requests with presets. Summarize with the Claude API, Ollama, or **Copy for Claude.ai** (the user's main no-cost path; the API is billed separately from a subscription). Meetings are saved and reopenable.
 - Memory: glossary, preferences ("Remember" on requests), saved examples ("Save as example" on responses).
-- Ollama: thinking off, context sized to input, single pass up to ~90 min of transcript (`SINGLE_PASS_CHARS` 90k), two-pass beyond.
+- Ollama: thinking off, context sized to input, single pass up to ~80 min of transcript (`SINGLE_PASS_CHARS` 80k), two-pass beyond; pre-warmed after transcription.
 - Copy for AI (was "Copy for Claude.ai"): first copy = everything; then "Copy follow-up" copies just the request + new transcript (`copied_transcript` on the meeting); "New AI chat" / Reset chat start over. No longer auto-opens claude.ai. Recommended model (gemma4:12b or qwen3.5:4b, by hardware) with a Download button.
 - Verified: file transcription (CPU and GPU), recorder pipeline (simulated input), settings, past meetings, error paths, Copy for Claude.ai, memory, two-pass flow/caching (mock), and real gemma4:12b output on the eval meeting.
 - First real use (57-min in-person meeting): Whisper looped one word for ~20 min; fixed with a loop guard and re-transcribed (recovered all of it). Speaker misattribution: prompt now forbids guessing; Me/Others labels on calls. Whisper also invented "Name.:" labels from the glossary prompt (fixed). Whole meeting re-transcribed clean (backup `*.before-loop-fix.*` in its folder).
@@ -18,7 +18,7 @@
 
 ## Next steps
 - Single pass with gemma on the 57-min meeting: 69 s (actions) / 112 s (notes), better than two-pass (453 s). Untested near 90 min / 32K context.
-- Idea: pre-warm Ollama's prompt cache with the transcript right after recording stops, so the first answer starts in seconds.
+- Pre-warm verified on the 57-min meeting (test copy): 38 s in the background, then first text at 3.9 s (notes done 115 s), follow-up first text 4.5 s; also triggers after upload. Not tested with a live recording stop.
 - Record a real call to check Me/Others labels.
 - Push to a public GitHub repo.
 - After the user's testing: Windows installer (bundled Python, Start menu shortcut, GitHub Releases), reusing LaserEngraver's build setup. Keep run.bat. The user said to wait until they've tested it.

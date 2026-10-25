@@ -22,6 +22,7 @@ Local web app: record/upload/paste a meeting → local Whisper transcript → no
 - `_FILLER` drops a lone "Thank you."/"Bye" in a chunk's last 1.5 s or stretched over 8+ s (seen 9× in one meeting).
 - `memory.whisper_terms` sends only glossary terms (text before ':') as a comma list. Sending "Ben C: Treasurer" lines made Whisper prefix lines with "Ben C.:" when Ben wasn't there.
 - Speaker labels: the recorder keeps per-source tracks per chunk; once system audio has been active `CALL_SECONDS`, `app.speaker` labels segments "Others" (system audio active) or "Me" (mic only). Uploads and mic-only recordings get no labels. The system prompt forbids guessing speakers.
+- Pre-warm (`app.start_prewarm` → `summarizer.ollama_prewarm`): when transcription finishes (or a meeting is opened) with provider Ollama, it sends system + first message (up to `</transcript>`) with `num_predict` 1 so Ollama caches the prefix; the first answer then starts in ~4 s instead of ~42 s. Must match exactly: same system prompt, same `_first_message`, and same `num_ctx` (`_prefix_context`, sized from the prefix plus fixed `ANSWER_TOKENS`); a different `num_ctx` reloads the model and loses the cache.
 - `/api/ask` with Ollama calls `transcriber.unload()` when idle (Whisper large-v3-turbo holds ~2 GB VRAM). Ollama requests send `keep_alive` `KEEP_ALIVE`.
 - Never call `Recorder.stop()` while holding `lock`: it flushes a final chunk whose callback takes the lock.
 

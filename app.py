@@ -120,6 +120,32 @@ def speaker(tracks, start, end):
     return None
 
 
+prewarm = {"status": "", "meeting": None}
+
+
+def start_prewarm(meeting):
+    """Once a transcript is complete, have Ollama read it in the background."""
+    settings = config.load()
+    if settings["provider"] != "ollama" or len(meeting.transcript) > summarizer.SINGLE_PASS_CHARS:
+        return
+    with lock:
+        if meeting is not current or meeting.recorder or meeting.pending or not meeting.transcript.strip():
+            return
+        transcript, context = meeting.transcript, meeting.context
+    system = summarizer.system_prompt(memory.prompt_section(memory.load()))
+
+    def run():
+        prewarm.update(status="reading", meeting=meeting.id)
+        try:
+            transcriber.unload()  # Whisper is done; give Ollama the GPU
+            summarizer.ollama_prewarm(settings, system, transcript, context)
+            prewarm["status"] = "ready"
+        except summarizer.SummarizerError:
+            prewarm["status"] = ""  # Ollama not running: the first request reports it
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def worker():
     """Transcribes queued audio one job at a time so the transcript stays in order."""
     while True:
@@ -145,6 +171,9 @@ def worker():
             with lock:
                 meeting.pending -= 1
                 meeting.save()
+                done = not (meeting.pending or meeting.recorder or meeting.error)
+            if done:
+                start_prewarm(meeting)
 
 
 def error(message, code=400):
@@ -171,6 +200,7 @@ def state():
             "levels": m.recorder.levels() if m.recorder else {},
             "pending": m.pending,
             "copied": m.copied_transcript is not None,
+            "prewarm": prewarm["status"] if prewarm["meeting"] == m.id else "",
             "error": m.error,
             "whisper": transcriber.info,
             "system_audio_supported": system_audio_supported(),
@@ -227,6 +257,7 @@ def open_meeting():
             current = Meeting.load(secure_filename(request.get_json()["id"]))
         except (OSError, ValueError, KeyError):
             return error("Couldn't open that meeting.")
+    start_prewarm(current)
     return jsonify(ok=True)
 
 
