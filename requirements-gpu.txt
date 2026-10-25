@@ -1,0 +1,6 @@
+# Optional: NVIDIA GPU transcription (much faster, allows the large-v3-turbo model).
+# Needs an NVIDIA GPU with a recent driver. Install with:
+#   .venv\Scripts\python -m pip install -r requirements-gpu.txt      (Windows)
+#   .venv/bin/python -m pip install -r requirements-gpu.txt          (Linux)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*

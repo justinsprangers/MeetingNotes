@@ -1,0 +1,12 @@
+# Your API key and preferences
+settings.json
+
+# Your meetings: audio, transcripts, notes
+meetings/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+.claude/

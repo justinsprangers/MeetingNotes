@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Notes</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <input id="title" class="title" placeholder="Untitled meeting" aria-label="Meeting title">
+  <div class="header-actions">
+    <select id="past" aria-label="Open a past meeting"><option value="">Past meetings…</option></select>
+    <button id="new-meeting">New meeting</button>
+    <button id="open-settings" aria-label="Settings">Settings</button>
+    <button id="open-help" aria-label="Help">?</button>
+  </div>
+</header>
+
+<main>
+  <section class="panel" id="left">
+    <div class="capture">
+      <button id="record" class="primary">● Record</button>
+      <label class="button" for="file">Upload audio</label>
+      <input id="file" type="file" accept="audio/*,video/*" hidden>
+      <span id="status" class="status"></span>
+    </div>
+    <div id="levels" class="levels"></div>
+    <div id="error" class="error" hidden></div>
+
+    <label for="context">Meeting context <span class="hint">(optional: attendees, roles, project names, jargon)</span></label>
+    <textarea id="context" rows="3" placeholder="e.g. Lab supervisors meeting. Josh is our manager and wasn't here. IPA = isopropyl alcohol for the Formlabs wash."></textarea>
+
+    <label for="transcript">Transcript <span class="hint">(record, upload, or paste one here)</span></label>
+    <textarea id="transcript" class="transcript" placeholder="The transcript appears here as you record. You can also paste one in."></textarea>
+  </section>
+
+  <section class="panel" id="right">
+    <div class="presets" id="presets"></div>
+    <div id="chat" class="chat">
+      <p class="empty">Ask for what you want from this meeting: full notes, a short update for someone who missed it, action items, a list of one topic, or a message formatted for Discord or email. Follow-ups work too: "shorter", "no emojis", "add that we need an update on the resin order".</p>
+    </div>
+    <form id="ask-form" class="ask">
+      <textarea id="ask" rows="3" placeholder="What do you want from this meeting? (Ctrl+Enter to send)"></textarea>
+      <div class="ask-actions">
+        <button type="button" id="reset-chat" class="link">Reset chat</button>
+        <button type="submit" id="send" class="primary">Send</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<dialog id="settings">
+  <form method="dialog" id="settings-form">
+    <h2>Settings</h2>
+
+    <fieldset>
+      <legend>Summarizer</legend>
+      <label><input type="radio" name="provider" value="claude"> Claude (Anthropic API, best quality, needs a key)</label>
+      <label><input type="radio" name="provider" value="ollama"> Ollama (free, runs on this computer)</label>
+    </fieldset>
+
+    <fieldset id="claude-fields">
+      <legend>Claude</legend>
+      <label>API key <input type="password" name="anthropic_api_key" autocomplete="off" placeholder="sk-ant-…"></label>
+      <div class="row"><span id="key-hint" class="hint"></span> <button type="button" id="clear-key" class="link">Remove saved key</button></div>
+      <label>Model <input name="claude_model"></label>
+      <p class="hint">Get a key at console.anthropic.com. Leave blank to use the ANTHROPIC_API_KEY environment variable.</p>
+    </fieldset>
+
+    <fieldset id="ollama-fields">
+      <legend>Ollama</legend>
+      <label>Server <input name="ollama_url"></label>
+      <label>Model <select name="ollama_model"></select></label>
+      <p class="hint" id="ollama-hint"></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Recording</legend>
+      <label><input type="checkbox" name="record_microphone"> Microphone</label>
+      <label><input type="checkbox" name="record_system_audio"> System audio (what plays through your speakers: Teams, Zoom, Meet)</label>
+      <p class="hint" id="system-audio-hint"></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>Transcription (Whisper, runs on this computer)</legend>
+      <label>Model
+        <select name="whisper_model">
+          <option value="auto">Auto (large-v3-turbo on GPU, small on CPU)</option>
+          <option value="tiny">tiny (fastest, least accurate)</option>
+          <option value="base">base</option>
+          <option value="small">small</option>
+          <option value="medium">medium</option>
+          <option value="large-v3-turbo">large-v3-turbo (best speed/accuracy on GPU)</option>
+          <option value="large-v3">large-v3 (most accurate, slowest)</option>
+        </select>
+      </label>
+      <label>Device
+        <select name="whisper_device">
+          <option value="auto">Auto (GPU if available)</option>
+          <option value="cpu">CPU</option>
+          <option value="cuda">NVIDIA GPU (CUDA)</option>
+        </select>
+      </label>
+      <label>Language <input name="language" placeholder="auto, or a code like en"></label>
+      <p class="hint">Currently: <span id="whisper-info"></span></p>
+    </fieldset>
+
+    <div class="dialog-actions">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="help">
+  <form method="dialog">
+    <h2>How to use</h2>
+    <ol>
+      <li><b>Get a transcript.</b> Click <b>Record</b> before the meeting starts (it captures your mic and, on Windows, your computer's audio, so online calls work). Or upload a recording, or paste a transcript from Teams/Zoom.</li>
+      <li><b>Add context</b> (optional): who's there, names and jargon. This fixes most misheard words.</li>
+      <li><b>Ask</b> for what you want, or click a preset. You can ask mid-meeting; new transcript text is sent automatically with each request.</li>
+      <li><b>Refine</b> with follow-ups ("shorter", "for Discord", "no emojis").</li>
+    </ol>
+    <p>Everything is saved in the <code>meetings</code> folder: the audio, <code>transcript.txt</code>, and <code>notes.md</code> with every response. Reopen a meeting from <b>Past meetings</b>.</p>
+    <p>Say "off the record" in the meeting and that part will be left out of the notes. Always get consent before recording people.</p>
+    <div class="dialog-actions"><button class="primary">Close</button></div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,341 @@
+"""Meeting Notes: a local web app that records or imports a meeting, transcribes
+it on this computer, and writes notes in whatever form you ask for.
+
+Start it with run.bat (Windows) or run.sh (Mac/Linux), or `python app.py`.
+"""
+import json
+import queue
+import re
+import socket
+import sys
+import threading
+import webbrowser
+from datetime import datetime
+
+from flask import Flask, Response, jsonify, request, send_from_directory
+from werkzeug.utils import secure_filename
+
+import config
+import summarizer
+from recorder import Recorder, system_audio_supported
+from transcriber import Transcriber
+
+app = Flask(__name__, static_folder="static", static_url_path="/static")
+transcriber = Transcriber()
+lock = threading.RLock()
+jobs = queue.Queue()
+
+
+class Meeting:
+    """One meeting's transcript and chat, saved in meetings/<id>/."""
+
+    def __init__(self, meeting_id):
+        self.id = meeting_id
+        self.folder = config.MEETINGS_DIR / meeting_id
+        self.title = ""
+        self.context = ""
+        self.transcript = ""
+        self.history = []          # [{"role", "text", "display", "raw"}]
+        self.sent_transcript = ""  # what the model has already seen
+        self.sent_context = ""
+        self.language = None
+        self.audio_seconds = 0.0
+        self.recorder = None
+        self.pending = 0
+        self.error = ""
+
+    @classmethod
+    def new(cls):
+        return cls(datetime.now().strftime("%Y-%m-%d_%H%M%S"))
+
+    @classmethod
+    def load(cls, meeting_id):
+        m = cls(meeting_id)
+        data = json.loads((m.folder / "meeting.json").read_text(encoding="utf-8"))
+        for k in ("title", "context", "transcript", "history", "sent_transcript",
+                  "sent_context", "language", "audio_seconds"):
+            setattr(m, k, data.get(k, getattr(m, k)))
+        return m
+
+    def is_empty(self):
+        return not (self.title or self.context or self.transcript or self.history)
+
+    def save(self):
+        if self.is_empty() and not self.folder.exists():
+            return
+        self.folder.mkdir(parents=True, exist_ok=True)
+        data = {k: getattr(self, k) for k in ("title", "context", "transcript", "history", "sent_transcript",
+                                              "sent_context", "language", "audio_seconds")}
+        (self.folder / "meeting.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
+        (self.folder / "transcript.txt").write_text(self.transcript, encoding="utf-8")
+        notes = [f"# {self.title or self.id}\n"]
+        for user, reply in zip(self.history[::2], self.history[1::2]):
+            notes.append(f"## {user['display']}\n\n{reply['text']}\n")
+        (self.folder / "notes.md").write_text("\n".join(notes), encoding="utf-8")
+
+    def whisper_prompt(self):
+        # Whisper only reads the last ~220 tokens of a prompt, so keep it short:
+        # the context (names, jargon), then the end of the transcript so far.
+        recent = re.sub(r"^\[[\d:]+\] ", "", self.transcript[-400:], flags=re.M).replace("\n", " ")
+        return f"{self.context.strip()[:400]} {recent}".strip()
+
+    def add_segment(self, start, text):
+        line = f"[{int(start // 60):02d}:{int(start % 60):02d}] {text}"
+        self.transcript += ("\n" if self.transcript else "") + line
+
+
+current = Meeting.new()
+
+
+def worker():
+    """Transcribes queued audio one job at a time so the transcript stays in order."""
+    while True:
+        meeting, source, offset, is_file = jobs.get()
+        settings = config.load()
+        language = None if settings["language"] == "auto" else settings["language"]
+        with lock:
+            prompt = meeting.whisper_prompt()
+        try:
+            def on_segment(start, text):
+                with lock:
+                    meeting.add_segment(start, text)
+            lang, duration = transcriber.transcribe(
+                source, settings, offset, language or meeting.language, on_segment, prompt)
+            with lock:
+                meeting.language = meeting.language or lang
+                if is_file:
+                    meeting.audio_seconds += duration
+        except Exception as e:
+            with lock:
+                meeting.error = f"Transcription failed: {e}"
+        finally:
+            with lock:
+                meeting.pending -= 1
+                meeting.save()
+
+
+def error(message, code=400):
+    return jsonify({"error": message}), code
+
+
+@app.get("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+
+@app.get("/api/state")
+def state():
+    with lock:
+        m = current
+        return jsonify({
+            "id": m.id,
+            "title": m.title,
+            "context": m.context,
+            "transcript": m.transcript,
+            "history": [{"role": t["role"], "text": t["display"]} for t in m.history],
+            "recording": m.recorder is not None,
+            "record_seconds": m.recorder.seconds if m.recorder else 0,
+            "levels": m.recorder.levels() if m.recorder else {},
+            "pending": m.pending,
+            "error": m.error,
+            "whisper": transcriber.info,
+            "system_audio_supported": system_audio_supported(),
+            "settings": config.public(config.load()),
+        })
+
+
+@app.post("/api/meeting")
+def update_meeting():
+    data = request.get_json()
+    with lock:
+        m = current
+        if "transcript" in data and (m.recorder or m.pending):
+            return error("Wait for recording and transcription to finish before editing.")
+        for k in ("title", "context", "transcript"):
+            if k in data:
+                setattr(m, k, data[k])
+        m.error = ""
+        m.save()
+    return jsonify(ok=True)
+
+
+@app.post("/api/new")
+def new_meeting():
+    global current
+    with lock:
+        if current.recorder:
+            return error("Stop recording first.")
+        current.save()
+        current = Meeting.new()
+    return jsonify(ok=True)
+
+
+@app.get("/api/meetings")
+def list_meetings():
+    out = []
+    if config.MEETINGS_DIR.exists():
+        for folder in sorted(config.MEETINGS_DIR.iterdir(), reverse=True):
+            f = folder / "meeting.json"
+            if f.exists():
+                title = json.loads(f.read_text(encoding="utf-8")).get("title", "")
+                out.append({"id": folder.name, "title": title})
+    return jsonify(out)
+
+
+@app.post("/api/open")
+def open_meeting():
+    global current
+    with lock:
+        if current.recorder or current.pending:
+            return error("Wait for recording and transcription to finish first.")
+        current.save()
+        try:
+            current = Meeting.load(secure_filename(request.get_json()["id"]))
+        except (OSError, ValueError, KeyError):
+            return error("Couldn't open that meeting.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/reset-chat")
+def reset_chat():
+    with lock:
+        current.history, current.sent_transcript, current.sent_context = [], "", ""
+        current.save()
+    return jsonify(ok=True)
+
+
+@app.post("/api/record/start")
+def record_start():
+    with lock:
+        m = current
+        if m.recorder:
+            return error("Already recording.")
+        settings = config.load()
+        m.folder.mkdir(parents=True, exist_ok=True)
+        n = len(list(m.folder.glob("recording-*.wav"))) + 1
+        base = m.audio_seconds
+
+        def on_chunk(audio, offset):
+            with lock:
+                m.pending += 1
+            jobs.put((m, audio, base + offset, False))
+
+        rec = Recorder(m.folder / f"recording-{n}.wav", on_chunk,
+                       use_mic=settings["record_microphone"], use_system=settings["record_system_audio"])
+        try:
+            rec.start()
+        except Exception as e:
+            return error(f"Couldn't start recording: {e}")
+        m.recorder = rec
+        m.error = ""
+        m.save()
+    return jsonify(ok=True)
+
+
+@app.post("/api/record/stop")
+def record_stop():
+    with lock:
+        m = current
+        rec, m.recorder = m.recorder, None
+    if rec:
+        rec.stop()  # outside the lock: stopping flushes a final chunk, which takes the lock
+        with lock:
+            m.audio_seconds += rec.seconds
+            m.save()
+    return jsonify(ok=True)
+
+
+@app.post("/api/upload")
+def upload():
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return error("No file selected.")
+    with lock:
+        m = current
+        if m.recorder:
+            return error("Stop recording first.")
+        m.folder.mkdir(parents=True, exist_ok=True)
+        path = m.folder / secure_filename(f.filename)
+        f.save(path)
+        m.pending += 1
+        m.error = ""
+        jobs.put((m, str(path), m.audio_seconds, True))
+    return jsonify(ok=True)
+
+
+@app.post("/api/ask")
+def ask():
+    request_text = (request.get_json().get("request") or "").strip()
+    if not request_text:
+        return error("Type what you want first.")
+    settings = config.load()
+    with lock:
+        m = current
+        transcript, context = m.transcript, m.context
+        history = list(m.history)
+        try:
+            message = summarizer.build_user_message(
+                request_text, transcript, m.sent_transcript, context, m.sent_context)
+        except summarizer.SummarizerError as e:
+            return error(str(e))
+
+    def generate():
+        parts, raw = [], None
+        try:
+            for kind, value in summarizer.stream(settings, history, message):
+                if kind == "text":
+                    parts.append(value)
+                    yield value
+                else:
+                    raw = value
+        except summarizer.SummarizerError as e:
+            yield f"\n\n[{e}]"
+            return  # nothing is recorded, so the next request resends the same transcript
+        except Exception as e:
+            yield f"\n\n[Unexpected error: {e}]"
+            return
+        with lock:
+            if m.history != history:
+                return  # chat was reset or changed while this was running
+            m.history += [
+                {"role": "user", "text": message, "display": request_text, "raw": None},
+                {"role": "assistant", "text": "".join(parts), "display": "".join(parts), "raw": raw},
+            ]
+            m.sent_transcript, m.sent_context = transcript, context
+            m.save()
+
+    return Response(generate(), mimetype="text/plain; charset=utf-8",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+@app.post("/api/settings")
+def save_settings():
+    data = request.get_json()
+    if data.get("clear_api_key"):
+        data["anthropic_api_key"] = ""
+    elif not data.get("anthropic_api_key"):
+        data.pop("anthropic_api_key", None)  # blank field = keep the saved key
+    return jsonify(config.public(config.save(data)))
+
+
+@app.get("/api/ollama-models")
+def ollama_models():
+    return jsonify(summarizer.ollama_models(config.load()))
+
+
+def already_running():
+    with socket.socket() as s:
+        return s.connect_ex(("127.0.0.1", config.PORT)) == 0
+
+
+if __name__ == "__main__":
+    url = f"http://127.0.0.1:{config.PORT}"
+    if already_running():
+        print(f"Meeting Notes is already running. Opening {url}")
+        webbrowser.open(url)
+        sys.exit()
+    threading.Thread(target=worker, daemon=True).start()
+    if "--no-browser" not in sys.argv:
+        threading.Timer(1.0, webbrowser.open, [url]).start()
+    print(f"Meeting Notes is running at {url}\nClose this window to quit.")
+    app.run(host="127.0.0.1", port=config.PORT, threaded=True)
