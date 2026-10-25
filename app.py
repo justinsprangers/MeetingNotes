@@ -29,7 +29,7 @@ jobs = queue.Queue()
 
 
 SAVED_FIELDS = ("title", "context", "transcript", "history", "sent_transcript", "sent_context",
-                "system", "extractions", "language", "audio_seconds")
+                "system", "extractions", "language", "audio_seconds", "copied_transcript", "copied_context")
 # Marks a progress note inside the streamed reply; the page shows it and drops it from the text.
 STATUS_START, STATUS_END = "\x01", "\x02"
 # "[12:34] " plus an optional "Me: "/"Others: " speaker label.
@@ -50,6 +50,8 @@ class Meeting:
         self.sent_context = ""
         self.system = ""           # Claude instructions + memory, fixed when the chat starts
         self.extractions = {}      # Ollama pass-1 notes per transcript section
+        self.copied_transcript = None  # what "Copy for AI" already put in an external chat
+        self.copied_context = None
         self.language = None
         self.audio_seconds = 0.0
         self.recorder = None
@@ -168,6 +170,7 @@ def state():
             "record_seconds": m.recorder.seconds if m.recorder else 0,
             "levels": m.recorder.levels() if m.recorder else {},
             "pending": m.pending,
+            "copied": m.copied_transcript is not None,
             "error": m.error,
             "whisper": transcriber.info,
             "system_audio_supported": system_audio_supported(),
@@ -231,6 +234,7 @@ def open_meeting():
 def reset_chat():
     with lock:
         current.history, current.sent_transcript, current.sent_context, current.system = [], "", "", ""
+        current.copied_transcript = current.copied_context = None
         current.save()
     return jsonify(ok=True)
 
@@ -364,13 +368,27 @@ def ask():
 
 @app.post("/api/copy-prompt")
 def copy_prompt():
-    request_text = (request.get_json().get("request") or "").strip()
+    """First copy: everything, for a new external chat. Later copies: just the request
+    plus any transcript added since, to paste into that same chat."""
+    data = request.get_json()
+    request_text = (data.get("request") or "").strip()
     with lock:
+        m = current
+        if data.get("restart"):
+            m.copied_transcript = m.copied_context = None
         try:
-            system = summarizer.system_prompt(memory.prompt_section(memory.load()))
-            text = summarizer.copy_prompt(system, request_text, current.transcript, current.context)
+            if m.copied_transcript is None:
+                system = summarizer.system_prompt(memory.prompt_section(memory.load()))
+                text = summarizer.copy_prompt(system, request_text, m.transcript, m.context)
+            else:
+                if not request_text:
+                    return error("Type a request or click a preset first.")
+                text = summarizer.build_user_message(
+                    request_text, m.transcript, m.copied_transcript, m.context, m.copied_context)
         except summarizer.SummarizerError as e:
             return error(str(e))
+        m.copied_transcript, m.copied_context = m.transcript, m.context
+        m.save()
     return jsonify(text=text)
 
 

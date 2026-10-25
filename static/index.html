@@ -46,7 +46,8 @@
       <div class="ask-actions">
         <button type="button" id="reset-chat" class="link">Reset chat</button>
         <span class="ask-buttons">
-          <button type="button" id="copy-claude" title="Copies the transcript, context and your request, and opens Claude.ai. Uses your Claude subscription instead of API credits.">Copy for Claude.ai</button>
+          <button type="button" id="copy-new" class="link" hidden title="Copy everything again (transcript included) to start a fresh chat in the other AI">New AI chat</button>
+          <button type="button" id="copy-ai" title="Copies the transcript, context and your request to paste into any AI chat (Claude.ai, ChatGPT, …). No API key or cost.">Copy for AI</button>
           <button type="submit" id="send" class="primary">Send</button>
         </span>
       </div>
@@ -69,7 +70,7 @@
       <label>API key <input type="password" name="anthropic_api_key" autocomplete="off" placeholder="sk-ant-…"></label>
       <div class="row"><span id="key-hint" class="hint"></span> <button type="button" id="clear-key" class="link">Remove saved key</button></div>
       <label>Model <input name="claude_model"></label>
-      <p class="hint">Get a key at console.anthropic.com. API use is billed separately from a Claude subscription; without a key, use Copy for Claude.ai instead. Leave blank to use the ANTHROPIC_API_KEY environment variable.</p>
+      <p class="hint">Get a key at console.anthropic.com. API use is billed separately from a Claude subscription; without a key, use Copy for AI instead. Leave blank to use the ANTHROPIC_API_KEY environment variable.</p>
     </fieldset>
 
     <fieldset id="ollama-fields">
@@ -122,7 +123,7 @@
 <dialog id="memory">
   <form method="dialog" id="memory-form">
     <h2>Memory</h2>
-    <p class="hint">What the app learns from you. It's used in every meeting, by every summarizer (including Copy for Claude.ai). Changes apply from the next new chat.</p>
+    <p class="hint">What the app learns from you. It's used in every meeting, by every summarizer (including Copy for AI). Changes apply from the next new chat.</p>
     <label for="glossary">Glossary <span class="hint">(one per line: names, roles, terms. Also helps the transcription spell them.)</span></label>
     <textarea id="glossary" rows="5" placeholder="Josh: lab manager&#10;IPA: isopropyl alcohol (Formlabs wash)&#10;Form 4: our resin printer"></textarea>
     <label for="preferences">Preferences <span class="hint">(how you like things written. "Remember" on a request adds it here.)</span></label>
@@ -146,7 +147,7 @@
       <li><b>Refine</b> with follow-ups ("shorter", "for Discord", "no emojis").</li>
       <li><b>Teach it.</b> Click <b>Remember</b> on a request you'll always want ("no emojis"), and <b>Save as example</b> on a response you liked. Put names and jargon in <b>Memory</b>.</li>
     </ol>
-    <p><b>No API key?</b> Type your request and click <b>Copy for Claude.ai</b>. It copies the transcript, context and request and opens Claude.ai: paste (Ctrl+V), send, and keep following up there. This uses your Claude subscription, not API credits.</p>
+    <p><b>No API key?</b> Type your request (or click a preset) and click <b>Copy for AI</b>. It copies the transcript, context and request: paste it (Ctrl+V) into a new chat in Claude.ai, ChatGPT or any AI. After that the button says <b>Copy follow-up</b>: presets and typed requests are copied on their own (plus any new transcript) to paste into the same chat. <b>New AI chat</b> copies everything again.</p>
     <p>Everything is saved in the <code>meetings</code> folder: the audio, <code>transcript.txt</code>, and <code>notes.md</code> with every response. Reopen a meeting from <b>Past meetings</b>.</p>
     <p>Say "off the record" in the meeting and that part will be left out of the notes. Always get consent before recording people.</p>
     <div class="dialog-actions"><button class="primary">Close</button></div>

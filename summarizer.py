@@ -30,12 +30,13 @@ Writing:
 
 CLAUDE_EFFORT = "medium"
 
-# Ollama: small models lose track of long transcripts, so long ones are read in
-# sections first (pass 1: extract the facts), then answered from those notes (pass 2).
-# Shorter ones go in whole: each section pass costs ~40 s on an 8 GB GPU, and in
-# testing gemma4:12b handled a 7.5-minute (2,600-token) transcript well in one pass.
-# Two-pass was a little more complete but twice as slow. Longer single passes are untested.
-SINGLE_PASS_CHARS = 20000   # about 5,000 tokens, roughly 15 minutes of talking
+# Ollama: transcripts that fit the context go in whole. On a real 57-min meeting
+# (55k chars, ~16k tokens) gemma4:12b on an 8 GB GPU answered in 69-112 s in one pass,
+# vs 453 s two-pass, and the single-pass notes were more complete. Follow-ups start
+# in seconds because Ollama reuses the cached transcript prefix. Only transcripts too
+# long for MAX_CONTEXT are read in sections first (pass 1: extract the facts), then
+# answered from those notes (pass 2). Single passes near 32K tokens are untested.
+SINGLE_PASS_CHARS = 90000   # about 26,000 tokens (~90 min), leaving room for the answer in MAX_CONTEXT
 SECTION_CHARS = 12000       # about 3,000 tokens, roughly 10-15 minutes
 MAX_CONTEXT = 32768         # Ollama's default context is small enough to silently cut off input
 KEEP_ALIVE = "2m"           # long enough for a follow-up question, short enough to give the RAM back
@@ -99,7 +100,7 @@ def build_user_message(request_text, transcript, sent_transcript, context, sent_
 
 
 def copy_prompt(system, request_text, transcript, context):
-    """One self-contained message to paste into a Claude.ai chat (covered by a subscription, no API cost)."""
+    """One self-contained message to paste into an external AI chat (no API cost)."""
     if not transcript.strip():
         raise SummarizerError("There's no transcript yet. Record, upload audio, or paste a transcript first.")
     parts = [system, _context_block(context), f"<transcript>\n{transcript.strip()}\n</transcript>",
@@ -135,7 +136,7 @@ def claude_stream(settings, system, history, user_message):
         if "authentication" not in str(e).lower():
             raise
         raise SummarizerError("No Anthropic API key. Add one in Settings, switch to Ollama, "
-                              "or use Copy for Claude.ai to use your Claude subscription instead.")
+                              "or use Copy for AI to paste into Claude.ai or another AI chat instead.")
     except anthropic.AuthenticationError:
         raise SummarizerError("The Anthropic API key was rejected. Check it in Settings.")
     except anthropic.PermissionDeniedError:

@@ -85,6 +85,7 @@ function render(s) {
   $("levels").innerHTML = Object.entries(s.levels).map(([name, level]) =>
     `<span>${name}<span class="meter"><span style="width:${Math.min(100, level * 400)}%"></span></span></span>`).join("");
   showError(s.error);
+  renderCopyButtons(s.copied);
 
   if (!streaming && s.history.length !== historyLength) {
     historyLength = s.history.length;
@@ -295,20 +296,36 @@ PRESETS.forEach(([label, prompt]) => {
   $("presets").append(b);
 });
 
-// No API key needed: copy everything as one message and paste it into a Claude.ai chat.
-$("copy-claude").addEventListener("click", async () => {
-  const button = $("copy-claude");
+// No API key needed: paste into any AI chat. The first copy carries the transcript;
+// after that, copies carry just the request (plus any new transcript) for the same chat.
+function renderCopyButtons(copied) {
+  const button = $("copy-ai");
+  if (!button.dataset.flashing) {
+    button.textContent = copied ? "Copy follow-up" : "Copy for AI";
+    button.title = copied
+      ? "Copies just your request (and any new transcript) to paste into the same AI chat"
+      : "Copies the transcript, context and your request to paste into any AI chat (Claude.ai, ChatGPT, …). No API key or cost.";
+  }
+  $("copy-new").hidden = !copied;
+}
+
+async function copyForAI(restart) {
+  const button = $("copy-ai");
   try {
     await saveNow();
-    const { text } = await api("/api/copy-prompt", { request: $("ask").value });
+    const { text } = await api("/api/copy-prompt", { request: $("ask").value, restart });
     await navigator.clipboard.writeText(text);
-    window.open("https://claude.ai/new", "_blank");
-    button.textContent = "Copied: paste into Claude (Ctrl+V)";
-    setTimeout(() => (button.textContent = "Copy for Claude.ai"), 4000);
+    $("ask").value = "";
+    button.dataset.flashing = "1";
+    button.textContent = "Copied: paste it (Ctrl+V)";
+    setTimeout(() => { delete button.dataset.flashing; renderCopyButtons(lastState.copied); }, 3000);
   } catch (e) {
     showError(e.message);
   }
-});
+}
+
+$("copy-ai").addEventListener("click", () => copyForAI(false));
+$("copy-new").addEventListener("click", () => copyForAI(true));
 
 $("reset-chat").addEventListener("click", async () => {
   if (!confirm("Clear the chat for this meeting? The transcript is kept.")) return;

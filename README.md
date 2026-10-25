@@ -17,7 +17,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - **Ask mid-meeting.** New transcript text is sent automatically with each request.
 - **Off the record:** say so in the meeting and that part is left out of the notes.
 - **Learns your style:** a Memory with a glossary (names, jargon), standing preferences, and example outputs you liked. It's used in every meeting.
-- **Three ways to summarize:** Claude through the API (best quality, in the app, pay-per-use), Ollama (free, fully offline), or **Copy for Claude.ai** (no key: copies everything into a Claude.ai chat, covered by your Claude subscription).
+- **Three ways to summarize:** Claude through the API (best quality, in the app, pay-per-use), Ollama (free, fully offline), or **Copy for AI** (no key: copies everything to paste into Claude.ai, ChatGPT or any AI chat, then copies follow-up requests for the same chat).
 - **Everything is saved** per meeting: the audio, `transcript.txt`, and `notes.md` with every response. Reopen any meeting later and keep asking.
 
 ## Requirements
@@ -27,7 +27,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - About 2 GB of free disk space (more with GPU support).
 - A summarizer, one of:
   - **Claude API:** a key from [console.anthropic.com](https://console.anthropic.com/). This is pay-as-you-go, billed separately from a Claude Pro/Max subscription.
-  - **Claude.ai:** no setup. Use the **Copy for Claude.ai** button with your existing Claude account (free or paid).
+  - **Claude.ai or another AI chat:** no setup. Use the **Copy for AI** button with your existing account (free or paid).
   - **Ollama:** free, from [ollama.com](https://ollama.com/). Install and start it, then in the app's Settings click **Download** next to the recommended model: `gemma4:12b` (7.7 GB) on computers with an 8 GB+ GPU or 16 GB+ RAM, otherwise `qwen3.5:4b` (3.3 GB).
 
 ## Install and run
@@ -49,7 +49,7 @@ The first transcription downloads the Whisper model (about 0.5 GB on CPU, 1.6 GB
 3. **Ask** for what you want, or click a preset. You can ask while still recording.
 4. **Refine** with follow-ups. **Copy** on a response copies just the message when the response is a single code block (the Discord and email presets).
 
-**Without an API key:** type your request (or click a preset), then click **Copy for Claude.ai**. It copies the instructions, context, transcript and request as one message and opens Claude.ai: paste with Ctrl+V, send, and keep following up there. If the meeting is still going, copy again later to send the updated transcript in a new chat.
+**Without an API key:** type your request (or click a preset), then click **Copy for AI**. It copies the instructions, context, transcript and request as one message: paste it (Ctrl+V) into a new chat in Claude.ai, ChatGPT or any AI. The button then becomes **Copy follow-up**: click a preset or type a request and it copies just that (plus any transcript recorded since) to paste into the same chat. **New AI chat** copies everything again for a fresh chat; **Reset chat** also starts over.
 
 ## Teaching it (Memory)
 
@@ -66,15 +66,15 @@ Memory is stored in `memory.json` next to the app. Changes apply from the next n
 Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop RTX 4060 (8 GB):
 
 - **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
-- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, the first answer took about 7.5 minutes and follow-ups about 20 seconds. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM. For long meetings, Copy for Claude.ai is much faster.
-- **`qwen3.5:4b` is faster but not recommended for notes.** On the same 57-minute meeting it was about 5× faster (93 s first answer, 5 s follow-ups), but it made up owners, due dates, and decisions nobody made. gemma4:12b stuck to what was said.
+- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, about 1–2 minutes for the first answer, and follow-ups start within seconds. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
+- **`qwen3.5:4b` is faster but not recommended for notes.** On the same meeting it made up owners, due dates, and decisions nobody made. gemma4:12b stuck to what was said.
 - Before an Ollama request, the app unloads Whisper from the GPU to make room (it reloads on the next transcription). Ollama frees the model's memory 2 minutes after the last request.
 
 To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and compare its output with `eval/answer_key.md`.
 
 ## How Ollama handles long meetings
 
-Small local models lose track of long transcripts. So for transcripts longer than about 15 minutes, the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
+Meetings up to about 90 minutes are read in one pass (on the 57-minute test meeting this was faster and more complete than two passes). Longer transcripts don't fit the model's memory, so the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
 
 Use **New meeting** for the next one and **Past meetings** to reopen old ones. The `?` button in the app has a short version of these steps.
 
@@ -82,7 +82,7 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 
 - **Audio and transcription stay on your computer.**
 - **With the Claude API**, the transcript text is sent to Anthropic for each request. A one-hour meeting is roughly 12,000 tokens, so a request costs about 5–10 cents with the default model (Claude Opus 5.5). Follow-ups cost less because the transcript is cached. You can switch to a cheaper model in Settings (e.g. `claude-sonnet-5-5` or `claude-haiku-5-5`). This is billed separately from any Claude subscription.
-- **With Copy for Claude.ai**, there's no API cost; it counts toward your normal Claude.ai usage limits. The transcript goes to Anthropic the same way as any chat.
+- **With Copy for AI**, there's no API cost; it counts toward your normal usage limits in whichever AI chat you paste into, and the transcript goes to that company the same way as any chat.
 - **With Ollama**, nothing leaves your computer and it's free, but summaries are noticeably weaker than Claude's.
 - Your API key is stored in `settings.json` next to the app, on your computer only. The `.gitignore` keeps it, `memory.json`, and your `meetings/` folder out of git.
 
@@ -97,7 +97,7 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | Setup failed partway | Check your internet connection and run `run.bat` again. If it keeps failing, delete the `.venv` folder and retry. |
 | Transcription is slow | On CPU, pick a smaller Whisper model in Settings (`base` or `tiny`). With an NVIDIA GPU, make sure Settings > Device shows CUDA (re-run setup by deleting `.venv`). |
 | Ollama says it can't connect | Start Ollama, then download a model from Settings (or run `ollama pull gemma4:12b`) and pick it. |
-| Ollama is very slow | The model is too big for your GPU. A smaller one like `qwen3.5:4b` is faster but less accurate; for long meetings, Copy for Claude.ai is faster and better. |
+| Ollama is very slow | The model is too big for your GPU. A smaller one like `qwen3.5:4b` is faster but less accurate; for long meetings, Copy for AI is faster and better. |
 | Names and terms come out wrong | Put them in Meeting context. |
 | The transcript repeats one word over and over | Whisper sometimes loops on silence or noise. The app now drops repeated and low-confidence lines (and stray "Thank you." filler) and stops feeding them back to Whisper. Check the mic level if it keeps happening. |
 | Notes name the wrong person | The transcript has no speaker names, so the summarizer only names someone when the words show who it was, and writes "[owner unclear]" otherwise. Say names out loud ("Ben, can you order the motors?"). On calls with system audio on, lines are labeled **Me** (your mic) or **Others** (the call). |
