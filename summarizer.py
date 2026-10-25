@@ -31,9 +31,13 @@ CLAUDE_EFFORT = "medium"
 
 # Ollama: small models lose track of long transcripts, so long ones are read in
 # sections first (pass 1: extract the facts), then answered from those notes (pass 2).
-OLLAMA_CONTEXT = 16384      # Ollama's default is small enough to silently cut off input
-SECTION_CHARS = 6000        # about 1,500 tokens, roughly 8-10 minutes of talking
-EXTRACT_PROMPT = """Below is section {i} of {n} of a meeting transcript. It comes from speech recognition, so expect misheard words.
+# Shorter ones go in whole: each section pass costs ~40 s on an 8 GB GPU, and in
+# testing gemma4:12b handled a 7.5-minute (2,600-token) transcript well in one pass.
+# Two-pass was a little more complete but twice as slow. Longer single passes are untested.
+SINGLE_PASS_CHARS = 20000   # about 5,000 tokens, roughly 15 minutes of talking
+SECTION_CHARS = 12000       # about 3,000 tokens, roughly 10-15 minutes
+MAX_CONTEXT = 32768         # Ollama's default context is small enough to silently cut off input
+EXTRACT_PROMPT = """Below is section {i} of {n} of a meeting transcript. It comes from speech recognition, so expect misheard words; use the glossary and context to correct names and terms.
 
 Write compact notes of everything in this section that could matter later:
 - Topics discussed, with the key points and any numbers, names, dates, and reasons given
@@ -162,7 +166,7 @@ def split_sections(transcript):
     return sections
 
 
-def ollama_answer(settings, system, history, request_text, transcript, context, cache):
+def ollama_answer(settings, system, history, request_text, transcript, context, cache, glossary=""):
     """Yields ("status", str) progress notes and ("text", str) pieces.
 
     history: earlier turns as {"role", "display"}; the transcript is supplied fresh each time.
@@ -174,14 +178,15 @@ def ollama_answer(settings, system, history, request_text, transcript, context, 
     if not transcript.strip():
         raise SummarizerError("There's no transcript yet. Record, upload audio, or paste a transcript first.")
 
-    if len(transcript) <= SECTION_CHARS * 1.5:
+    if len(transcript) <= SINGLE_PASS_CHARS:
         material = f"<transcript>\n{transcript.strip()}\n</transcript>"
     else:
         sections = split_sections(transcript)
         notes, used = [], {}
-        context_line = f"\nMeeting context: {context.strip()}\n" if context.strip() else ""
+        context_line = "".join(f"\n{label}:\n{text.strip()}\n" for label, text in
+                               (("Glossary", glossary), ("Meeting context", context)) if text.strip())
         for i, text in enumerate(sections, 1):
-            key = hashlib.sha1(f"{model}\n{context}\n{text}".encode()).hexdigest()
+            key = hashlib.sha1(f"{model}\n{context_line}\n{text}".encode()).hexdigest()
             if key not in cache:
                 yield ("status", f"Reading the transcript: section {i} of {len(sections)}…")
                 prompt = EXTRACT_PROMPT.format(i=i, n=len(sections), context=context_line, text=text)
@@ -205,12 +210,23 @@ def ollama_answer(settings, system, history, request_text, transcript, context, 
     yield from (("text", t) for t in _ollama_stream(settings, messages))
 
 
+def _context_size(messages):
+    # Big enough for the input plus a long answer (~3.5 characters per token), in 4K steps.
+    tokens = sum(len(m["content"]) for m in messages) / 3.5 + 4096
+    return int(min(MAX_CONTEXT, max(8192, -(-tokens // 4096) * 4096)))
+
+
 def _ollama_post(settings, body, stream):
     url = settings["ollama_url"].rstrip("/") + "/api/chat"
-    body = {"model": settings["ollama_model"], "stream": stream,
-            "options": {"num_ctx": OLLAMA_CONTEXT}, **body}
+    # Thinking models (gemma4, qwen3.5) otherwise reason at length first: about 3x slower,
+    # and the notes were just as good without it in testing.
+    body = {"model": settings["ollama_model"], "stream": stream, "think": False,
+            "options": {"num_ctx": _context_size(body["messages"])}, **body}
     try:
         r = requests.post(url, json=body, stream=stream, timeout=(5, 900))
+        if r.status_code == 400 and "think" in r.text:  # model without a thinking switch
+            del body["think"]
+            r = requests.post(url, json=body, stream=stream, timeout=(5, 900))
     except requests.RequestException:
         raise SummarizerError(f"Can't reach Ollama at {settings['ollama_url']}. Is it running?")
     if r.status_code != 200:

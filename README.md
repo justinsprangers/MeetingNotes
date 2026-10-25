@@ -61,9 +61,19 @@ The app gets better the more you use it:
 
 Memory is stored in `memory.json` next to the app. Changes apply from the next new chat (**New meeting** or **Reset chat**).
 
+## What to expect from Ollama
+
+Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop RTX 4060 (8 GB):
+
+- **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
+- **Speed:** about 45–90 seconds per answer. The 7.7 GB model doesn't quite fit in an 8 GB GPU, so part of it runs on the CPU. A GPU with 12 GB or more is much faster.
+- Longer meetings haven't been tested yet.
+
+To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and compare its output with `eval/answer_key.md`.
+
 ## How Ollama handles long meetings
 
-Small local models lose track of long transcripts. So for transcripts longer than about 10 minutes, the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
+Small local models lose track of long transcripts. So for transcripts longer than about 15 minutes, the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
 
 Use **New meeting** for the next one and **Past meetings** to reopen old ones. The `?` button in the app has a short version of these steps.
 
@@ -99,6 +109,7 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | `transcriber.py` | faster-whisper; tries the GPU, then falls back to CPU |
 | `summarizer.py` | The system prompt, Claude (Anthropic SDK, streaming) and Ollama calls (two-pass for long transcripts), model recommendation |
 | `memory.py` | Glossary, preferences, and saved examples (`memory.json`) and how they're added to the prompt |
+| `eval/` | A fictional test meeting, its answer key, and a script to check Ollama models against it |
 | `config.py` | Settings defaults and storage |
 | `static/` | The page: `index.html`, `app.js` (including the preset prompts), `style.css` |
 

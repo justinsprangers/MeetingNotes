@@ -287,14 +287,15 @@ def ask():
                 request_text, transcript, m.sent_transcript, context, m.sent_context)
         except summarizer.SummarizerError as e:
             return error(str(e))
-        live_system = summarizer.system_prompt(memory.prompt_section(memory.load()))
+        mem = memory.load()
+        live_system = summarizer.system_prompt(memory.prompt_section(mem))
         # Claude: the instructions (with memory) are fixed for the whole chat, because
         # changing them mid-conversation would break its append-only history.
         system = m.system or live_system
 
     if settings["provider"] == "ollama":
         source = summarizer.ollama_answer(settings, live_system, history, request_text,
-                                          transcript, context, m.extractions)
+                                          transcript, context, m.extractions, mem["glossary"])
     else:
         source = summarizer.claude_stream(settings, system, history, message)
 

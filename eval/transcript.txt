@@ -1,0 +1,102 @@
+[00:00] Okay, is it recording? Yeah, the light's on. Cool.
+[00:04] Did anyone watch the game Saturday? That last drive was unreal.
+[00:09] I fell asleep in the third quarter, honestly. I had a lab report due.
+[00:14] Same. Okay, let's get going, we've got a lot. Josh can't make it today, so I'll write up an update for him after.
+[00:21] First thing is the form labs wash station. The IP is contaminated again. It's cloudy, there's resin floating in it.
+[00:29] Yeah, I noticed that Thursday. Prints are coming out tacky.
+[00:33] So we need new IP. We're out of the spare drum too.
+[00:37] How much do we usually get?
+[00:39] Last time it was two five-gallon drums, that was about two hundred forty dollars.
+[00:45] Okay. Priya, can you put in that order?
+[00:48] Yeah, I can, but it's over the limit I can approve, so Josh has to sign off on it.
+[00:53] Right, so that goes in the update for Josh. Two drums, two forty.
+[00:58] And then the wash itself. Formlabs says two washes, a dirty wash and a clean wash. We've been doing one.
+[01:05] Honestly I think one is fine for us. It's not worth the extra IP.
+[01:09] I mean, for now let's just keep doing one wash and see.
+[01:13] Okay.
+[01:15] Wait, actually, the tacky prints, that's probably because of the single wash. If we did two, the second bath stays clean way longer.
+[01:22] That's true. And then we wouldn't burn through IP as fast, because the first bath takes all the dirt.
+[01:28] Okay, that changes it. Let's switch to two washes. Once the new IP comes in, we fill both tanks and do it properly.
+[01:35] So starting when the new drums arrive, two wash process. Everyone agree? Yeah. Yeah.
+[01:41] Cool. Next, the laser cutter. The window on the metal laser is pretty scratched up.
+[01:47] Is it actually affecting cuts, or is that just a guess?
+[01:50] It's not cutting aluminum like it used to. But we don't really know if it's the window.
+[01:55] We have the power meter, right? Sam, could you measure the power through the old window and then without it, or with a new one, and compare?
+[02:03] Yeah, I can do that. I'll have numbers by next meeting.
+[02:06] And a new window is about three eighty, so if we do need it, that's another one for Josh to approve.
+[02:12] Okay, so Josh needs to know that might be coming, three hundred eighty for the window, pending Sam's measurement.
+[02:19] Also, quick tip, I bumped the air assist to a hundred ten PSI instead of the factory hundred, and it cuts aluminum way better.
+[02:26] Oh nice. We should put that in the SOP.
+[02:29] Speaking of the non-metal laser, people are cutting acrylic way too thick. Someone tried ten millimeter last week and it caught fire.
+[02:36] Yeah that was bad. I had to use the extinguisher. Well, almost. I had it in my hand.
+[02:41] Let's just set a rule. No acrylic over six millimeters on the non-metal laser.
+[02:46] Agreed. Six millimeter max. Put it on a sign by the machine too.
+[02:51] Okay. Who's updating the non-metal laser SOP? It's been on the list forever.
+[02:56] I'll do it. Devon. I'll do it by Friday.
+[02:59] Can you put the hazards and controls on the first page? Nobody reads past page one.
+[03:04] Yeah, hazards and controls first page, then the steps. And I'll add the six millimeter rule.
+[03:10] Perfect. And eventually I want every SOP to have a one page flow chart like the water jet one.
+[03:16] That's a bigger project though. Let's not commit to that this semester.
+[03:20] Fair. So just the non-metal laser SOP for now, Devin, Friday.
+[03:25] Okay. Peer mentor training. This is the big one.
+[03:29] So the problem is the peer mentors don't know the hazards. I asked two of them what PPE you need for post processing resin and neither knew.
+[03:37] Yeah, and they don't know where stuff is. Someone asked me where the spare nitrile gloves are and I had to go find them myself.
+[03:44] What if we do a short training every week? Like thirty minutes, and a different supervisor runs it each time.
+[03:50] I like that. What day?
+[03:52] Tuesdays work for most of the mentors. Four to four thirty?
+[03:56] Tuesday four to four thirty, weekly, rotating who leads it. Yeah.
+[04:01] First one is November third, right? That's next Tuesday.
+[04:04] Yeah. Mariah, could you do the first one on resin safety? You know that stuff best.
+[04:09] Sure, Maria here, I can do resin. PPE, eye exposure, triple washing the containers, hazardous waste.
+[04:16] Can you have slides ready by Monday so we can look at them?
+[04:19] Yeah, slides by Monday.
+[04:21] Other topics for later weeks: fire safety on the lasers, where supplies are kept, the material selection flowchart for printing, and a SharePoint tour.
+[04:29] Oh, and how to explain to students why the PPE matters, not just what it is.
+[04:34] Good. I'll keep a list.
+[04:36] Should we also do one-on-ones with the mentors? Like feedback meetings?
+[04:40] Maybe monthly, short ones. But let's not decide that today, I want to see how the weekly trainings go first.
+[04:46] Okay, parking that.
+[04:48] Next. The shared drive situation. We have SOPs in Google Drive and some in SharePoint and nobody knows which is current.
+[04:55] It's a mess. I updated the water jet SOP in SharePoint and someone printed the old one from Google Drive.
+[05:01] Let's just pick SharePoint, since that's what the university supports.
+[05:05] Yeah. Move everything into a Lab SOPs folder in SharePoint, and then kill the Google Drive copies.
+[05:11] By when?
+[05:12] End of the month. Let's say October thirty first.
+[05:15] Who's doing the move?
+[05:17] I can do it, it's mostly drag and drop. Sam.
+[05:20] Okay, Sam moves SOPs to SharePoint, Lab SOPs folder, by the thirty first, then we archive the Google Drive ones.
+[05:27] Oh, speaking of which, hey, can we go off the record for a second?
+[05:30] Sure.
+[05:31] Okay so between us, Kevin from the evening shift never cleans the wash station. Like, ever. It's every single time.
+[05:38] Yeah, I've noticed. It's annoying.
+[05:40] I don't want that in the notes though, I'll just talk to him myself.
+[05:43] Okay, strike that. Back on the record.
+[05:46] Tool drawer. It's chaos. Half the Allen keys are gone.
+[05:50] What if we do shadow foam? Cut outlines of each tool so you can see what's missing.
+[05:55] Oh, that's a good idea. We could cut it on the CNC.
+[05:58] Devin and Sam, can you two do the shadow foam?
+[06:01] Yeah. We'll do it. No real deadline, but before Thanksgiving would be nice.
+[06:06] Okay, before Thanksgiving. And we label every slot.
+[06:10] Next, software. The grab cad license runs out end of November.
+[06:15] How much is renewal?
+[06:16] Twelve hundred a year.
+[06:18] Okay, that definitely needs Josh. Plus we never heard back about the Formlabs resin order from three weeks ago.
+[06:24] Right, the clear and tough resin. Did that ever get placed?
+[06:27] No idea. Priya, can you email Josh about the resin order and the license renewal?
+[06:32] Yeah, I'll email him today. Resin order status and the grab cad renewal.
+[06:36] And can you put the IP order in that same email?
+[06:39] Yep, all three in one email.
+[06:41] Weekend water jet use. Some of the students want to use it unsupervised on Saturdays.
+[06:47] I'm not comfortable with that. If something goes wrong there's no one there.
+[06:51] But we could require them to be badged at level two and have a buddy.
+[06:55] I don't know. I think that's a Josh decision honestly. Let's not decide, we'll bring it up with him.
+[07:00] Okay, open question for Josh then.
+[07:03] Also, should we check badges at the door? Like actually swipe people in?
+[07:07] That would help, but we don't have a card reader.
+[07:10] Let's think about it. Not today.
+[07:12] Okay. Anything else?
+[07:14] I think the overall thing is, we need to actually follow the processes we have before we write a bunch of new ones.
+[07:20] Agreed. Execution first. Get the trainings going, get the SOPs current, then improve.
+[07:26] Yeah. Problems in the process only show up once people actually follow it.
+[07:31] Okay. That's it. Anyone want to get lunch? I'm starving.
+[07:35] The Thai place? Yeah, let's go.
