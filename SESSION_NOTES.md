@@ -5,8 +5,9 @@
 - Memory: glossary, preferences ("Remember" on requests), saved examples ("Save as example" on responses).
 - Ollama: thinking off, context sized to input, single pass up to ~15 min of transcript, two-pass beyond. Recommended model (gemma4:12b or qwen3.5:4b, by hardware) with a Download button.
 - Verified: file transcription (CPU and GPU), recorder pipeline (simulated input), settings, past meetings, error paths, Copy for Claude.ai, memory, two-pass flow/caching (mock), and real gemma4:12b output on the eval meeting.
-- First real use (57-min in-person meeting): Whisper looped one word for ~20 min; fixed with a loop guard and re-transcribed (recovered all of it). Speaker misattribution: prompt now forbids guessing; Me/Others labels on calls. gemma4:12b took 385 s for the first answer on 55k chars (two-pass) on the 8 GB GPU.
-- **Not verified:** real Claude API replies (no key), live system-audio capture (speakers were muted) and so the Me/Others labels outside simulation, qwen3.5:4b quality/speed (not downloaded), Mac/Linux.
+- First real use (57-min in-person meeting): Whisper looped one word for ~20 min; fixed with a loop guard and re-transcribed (recovered all of it). Speaker misattribution: prompt now forbids guessing; Me/Others labels on calls. Whisper also invented "Name.:" labels from the glossary prompt (fixed). Whole meeting re-transcribed clean (backup `*.before-loop-fix.*` in its folder).
+- Model comparison on that meeting (cleaned): gemma4:12b 453 s first answer / 23 s follow-up, grounded (one owner misattributed). qwen3.5:4b 93 s / 5 s, fits fully on GPU, but invented owners, due dates, and decisions. gemma stays recommended on 8 GB.
+- **Not verified:** real Claude API replies (no key), live system-audio capture (speakers were muted) and so the Me/Others labels outside simulation, Mac/Linux.
 
 ## Eval results (2026-10-25, eval/transcript.txt, 7.5-min fictional meeting)
 - Claude baseline (written in-session by Opus 5.5 with the same prompt): everything in the answer key.
@@ -15,7 +16,7 @@
 - Thinking on was ~3× slower with no quality gain.
 
 ## Next steps
-- Download qwen3.5:4b and run `eval/run_eval.py` + a real long meeting to compare with gemma4:12b.
+- Speed for long meetings on Ollama: ideas are fewer/larger sections or a single pass with gemma (untested beyond 15 min).
 - Record a real call to check Me/Others labels.
 - Push to a public GitHub repo.
 - After the user's testing: Windows installer (bundled Python, Start menu shortcut, GitHub Releases), reusing LaserEngraver's build setup. Keep run.bat. The user said to wait until they've tested it.
@@ -26,7 +27,7 @@
 - Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo on CUDA, small on CPU.
 
 ## Log
-- 2026-10-25: Whisper loop guard, no-guess speaker rule + Me/Others labels, unload Whisper before Ollama, keep_alive 2m, gemma4:12b now recommended only for 12 GB+ GPUs
+- 2026-10-25: Whisper loop guard + filler filter, glossary-as-terms for Whisper, no-guess speaker rule + Me/Others labels, unload Whisper before Ollama, keep_alive 2m; qwen3.5:4b vs gemma4:12b compared (gemma kept)
 - 2026-10-25: Ollama installed; gemma4:12b eval; thinking off, glossary in extraction, single-pass up to ~15 min; eval/ folder
 - 2026-10-24: Memory, Ollama two-pass summarizing, model recommendation + download
 - 2026-10-24: Copy for Claude.ai button (uses the subscription, no API cost)

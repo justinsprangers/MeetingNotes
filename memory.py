@@ -80,5 +80,10 @@ def prompt_section(data: dict) -> str:
 
 
 def whisper_terms(data: dict) -> str:
-    """Glossary as a short phrase list for Whisper's prompt."""
-    return data["glossary"].replace("\n", "; ")[:300]
+    """Glossary terms (the part before each ':') as a comma list for Whisper's prompt.
+
+    Passing "Ben C: Treasurer" lines made Whisper imitate speaker labels and start
+    lines with "Ben C.:" whether or not he was talking.
+    """
+    terms = [line.split(":")[0].strip() for line in data["glossary"].splitlines()]
+    return ", ".join(t for t in terms if t)[:300]

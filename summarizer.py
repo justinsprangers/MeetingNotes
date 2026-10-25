@@ -14,7 +14,7 @@ SYSTEM_PROMPT = """You turn meeting transcripts into whatever the user asks for:
 
 About the transcript:
 - It comes from automatic speech recognition, so expect misheard words, missing punctuation, and no speaker names. Use context to work out what was meant.
-- Never guess who said something. Name a person only when the transcript shows it: they say their own name, someone addresses them by name right before they answer, or someone says "Name will…". Otherwise write it without a name (for example "Someone suggested…"), and mark owners you can't tell as "[owner unclear]". Lines labeled "Me:" were spoken by the person who recorded the meeting (their name may be in the glossary); "Others:" means someone else on the call. When an unclear word or name matters, flag it briefly (for example "[unclear: probably IPA]") instead of guessing silently.
+- Never guess who said something. Name a person only when the transcript shows it: they say their own name, someone addresses them by name right before they answer, or someone says "Name will…". Otherwise write it without a name (for example "Someone suggested…"), and mark owners you can't tell as "[owner unclear]". Only if lines start with "Me:" or "Others:": "Me" is the person who recorded the meeting (their name may be in the glossary) and "Others" is someone else on the call. Never write "Me" as a name or owner in your output. When an unclear word or name matters, flag it briefly (for example "[unclear: probably IPA]") instead of guessing silently.
 - Lines start with [minutes:seconds] timestamps from the start of the recording.
 - It may arrive in parts while the meeting is still going. Treat later parts as a continuation of the same meeting, and update earlier output when asked.
 - Side conversations, small talk, and personal remarks are usually not meeting content. Leave them out unless the user asks for them.
@@ -48,7 +48,7 @@ Write compact notes of everything in this section that could matter later:
 - Open questions, and anything that needs someone's approval
 - If something is said to be off the record, write only "[off-the-record part omitted]" for it
 
-The transcript has no speaker names. Name a person only when the text itself shows who spoke (they say their name, are addressed by name, or are named as the owner); never guess from the glossary. "Me:" lines are the person who recorded; "Others:" is someone else on the call.
+The transcript has no speaker names. Name a person only when the text itself shows who spoke (they say their name, are addressed by name, or are named as the owner); never guess from the glossary. Only if lines start with "Me:" or "Others:": "Me" is the person who recorded and "Others" is someone else on the call. Never write "Me" as a name.
 
 Skip small talk and side conversations. Use short bullet points and keep the [mm:ss] timestamp at the start of each item. Don't add anything that isn't in the transcript.
 {context}
@@ -58,9 +58,10 @@ Skip small talk and side conversations. Use short bullet points and keep the [mm
 
 RECOMMENDED_MODELS = [
     # (model, download size, minimum GPU memory GB, or minimum system RAM GB)
-    # gemma4:12b only partly fits on an 8 GB card (36 of 49 layers), so the rest runs
-    # on the CPU from system RAM: slow and memory-hungry. It needs a 12 GB card.
-    ("gemma4:12b", "7.7 GB", 11.5, 0),
+    # gemma4:12b only partly fits on an 8 GB card (36 of 49 layers), so it's slow there
+    # (459 s first answer on a 57-min meeting vs 140 s for qwen3.5:4b), but qwen invented
+    # deadlines and got facts wrong on the same meeting, so gemma stays the pick at 8 GB.
+    ("gemma4:12b", "7.7 GB", 7.5, 16),   # 7.5: "8 GB" cards report slightly under 8
     ("qwen3.5:4b", "3.3 GB", 0, 0),
 ]
 

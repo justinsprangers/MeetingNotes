@@ -39,9 +39,16 @@ def collapse_repeats(text):
     return text.strip()
 
 
-def _hallucinated(seg):
+# Sign-offs Whisper invents at the end of a chunk or over a long pause (from YouTube-style training data).
+_FILLER = re.compile(r"^(thank you( (so|very) much)?|thanks( for watching)?|bye)[.!]?$", re.I)
+
+
+def _hallucinated(seg, text, duration):
     # Whisper's own warning signs: very repetitive text, or likely silence it filled in anyway.
-    return seg.compression_ratio > 2.4 or (seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0)
+    if seg.compression_ratio > 2.4 or (seg.no_speech_prob > 0.6 and seg.avg_logprob < -1.0):
+        return True
+    # A lone "Thank you." in the last second of a chunk, or stretched over 8+ s, is filler.
+    return bool(_FILLER.match(text)) and (seg.end > duration - 1.5 or seg.end - seg.start > 8)
 
 
 class Transcriber:
@@ -91,7 +98,7 @@ class Transcriber:
                 condition_on_previous_text=False)
             for seg in segments:
                 text = collapse_repeats(seg.text)
-                if text and not _hallucinated(seg):
+                if text and not _hallucinated(seg, text, info.duration):
                     on_segment(offset + seg.start, offset + seg.end, text)
             return info.language, info.duration
 
