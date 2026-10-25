@@ -16,6 +16,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - **You choose what to get out of it:** type any request, or click a preset (meeting notes, update for someone absent, action items, decisions, Discord, email). Follow-ups work like a chat ("shorter", "add that we still need the resin order").
 - **Ask mid-meeting.** New transcript text is sent automatically with each request.
 - **Off the record:** say so in the meeting and that part is left out of the notes.
+- **Learns your style:** a Memory with a glossary (names, jargon), standing preferences, and example outputs you liked. It's used in every meeting.
 - **Three ways to summarize:** Claude through the API (best quality, in the app, pay-per-use), Ollama (free, fully offline), or **Copy for Claude.ai** (no key: copies everything into a Claude.ai chat, covered by your Claude subscription).
 - **Everything is saved** per meeting: the audio, `transcript.txt`, and `notes.md` with every response. Reopen any meeting later and keep asking.
 
@@ -27,7 +28,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - A summarizer, one of:
   - **Claude API:** a key from [console.anthropic.com](https://console.anthropic.com/). This is pay-as-you-go, billed separately from a Claude Pro/Max subscription.
   - **Claude.ai:** no setup. Use the **Copy for Claude.ai** button with your existing Claude account (free or paid).
-  - **Ollama:** free, from [ollama.com](https://ollama.com/). Then run `ollama pull llama3.1:8b` (or another model). A machine with 16 GB+ RAM or a GPU is recommended.
+  - **Ollama:** free, from [ollama.com](https://ollama.com/). Install and start it, then in the app's Settings click **Download** next to the recommended model: `gemma4:12b` (7.7 GB) on computers with an 8 GB+ GPU or 16 GB+ RAM, otherwise `qwen3.5:4b` (3.3 GB).
 
 ## Install and run
 
@@ -50,6 +51,20 @@ The first transcription downloads the Whisper model (about 0.5 GB on CPU, 1.6 GB
 
 **Without an API key:** type your request (or click a preset), then click **Copy for Claude.ai**. It copies the instructions, context, transcript and request as one message and opens Claude.ai: paste with Ctrl+V, send, and keep following up there. If the meeting is still going, copy again later to send the updated transcript in a new chat.
 
+## Teaching it (Memory)
+
+The app gets better the more you use it:
+
+- **Glossary:** in **Memory**, list names, roles, and terms, one per line (`Josh: lab manager`). The summarizer uses them to fix misheard words, and Whisper uses them to spell names right.
+- **Remember:** click it under a request you'll always want ("no emojis", "keep updates short"). It's added to your standing preferences.
+- **Save as example:** click it on a response you liked. Future responses to similar requests copy its structure and tone. The newest 4 examples are used.
+
+Memory is stored in `memory.json` next to the app. Changes apply from the next new chat (**New meeting** or **Reset chat**).
+
+## How Ollama handles long meetings
+
+Small local models lose track of long transcripts. So for transcripts longer than about 10 minutes, the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
+
 Use **New meeting** for the next one and **Past meetings** to reopen old ones. The `?` button in the app has a short version of these steps.
 
 ## Cost and privacy
@@ -58,7 +73,7 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 - **With the Claude API**, the transcript text is sent to Anthropic for each request. A one-hour meeting is roughly 12,000 tokens, so a request costs about 5–10 cents with the default model (Claude Opus 5.5). Follow-ups cost less because the transcript is cached. You can switch to a cheaper model in Settings (e.g. `claude-sonnet-5-5` or `claude-haiku-5-5`). This is billed separately from any Claude subscription.
 - **With Copy for Claude.ai**, there's no API cost; it counts toward your normal Claude.ai usage limits. The transcript goes to Anthropic the same way as any chat.
 - **With Ollama**, nothing leaves your computer and it's free, but summaries are noticeably weaker than Claude's.
-- Your API key is stored in `settings.json` next to the app, on your computer only. The `.gitignore` keeps it and your `meetings/` folder out of git.
+- Your API key is stored in `settings.json` next to the app, on your computer only. The `.gitignore` keeps it, `memory.json`, and your `meetings/` folder out of git.
 
 **Get consent before recording anyone.** Recording laws vary by place; many require everyone's permission.
 
@@ -70,7 +85,8 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | "Python 3.10 or newer is required" | Install Python from python.org with "Add python.exe to PATH" ticked, then run `run.bat` again. |
 | Setup failed partway | Check your internet connection and run `run.bat` again. If it keeps failing, delete the `.venv` folder and retry. |
 | Transcription is slow | On CPU, pick a smaller Whisper model in Settings (`base` or `tiny`). With an NVIDIA GPU, make sure Settings > Device shows CUDA (re-run setup by deleting `.venv`). |
-| Ollama says it can't connect | Start Ollama and pull a model (`ollama pull llama3.1:8b`), then pick it in Settings. |
+| Ollama says it can't connect | Start Ollama, then download a model from Settings (or run `ollama pull gemma4:12b`) and pick it. |
+| Ollama is very slow | The model is too big for your GPU. Pick a smaller one, e.g. `qwen3.5:4b`. |
 | Names and terms come out wrong | Put them in Meeting context. |
 | Port 8806 is in use | Change `PORT` in `config.py`. |
 
@@ -81,7 +97,8 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | `app.py` | Flask server: meeting state, background transcription queue, API routes |
 | `recorder.py` | Captures mic (sounddevice) and system audio (WASAPI loopback via PyAudioWPatch), mixes to 16 kHz mono, writes the WAV, and cuts ~30 s chunks at quiet points |
 | `transcriber.py` | faster-whisper; tries the GPU, then falls back to CPU |
-| `summarizer.py` | The system prompt, Claude (Anthropic SDK, streaming) and Ollama calls |
+| `summarizer.py` | The system prompt, Claude (Anthropic SDK, streaming) and Ollama calls (two-pass for long transcripts), model recommendation |
+| `memory.py` | Glossary, preferences, and saved examples (`memory.json`) and how they're added to the prompt |
 | `config.py` | Settings defaults and storage |
 | `static/` | The page: `index.html`, `app.js` (including the preset prompts), `style.css` |
 

@@ -12,6 +12,7 @@
   <div class="header-actions">
     <select id="past" aria-label="Open a past meeting"><option value="">Past meetings…</option></select>
     <button id="new-meeting">New meeting</button>
+    <button id="open-memory">Memory</button>
     <button id="open-settings" aria-label="Settings">Settings</button>
     <button id="open-help" aria-label="Help">?</button>
   </div>
@@ -76,6 +77,8 @@
       <label>Server <input name="ollama_url"></label>
       <label>Model <select name="ollama_model"></select></label>
       <p class="hint" id="ollama-hint"></p>
+      <div class="row"><span class="hint" id="ollama-recommend"></span> <button type="button" id="ollama-pull">Download</button></div>
+      <p class="hint" id="ollama-pull-status"></p>
     </fieldset>
 
     <fieldset>
@@ -116,6 +119,23 @@
   </form>
 </dialog>
 
+<dialog id="memory">
+  <form method="dialog" id="memory-form">
+    <h2>Memory</h2>
+    <p class="hint">What the app learns from you. It's used in every meeting, by every summarizer (including Copy for Claude.ai). Changes apply from the next new chat.</p>
+    <label for="glossary">Glossary <span class="hint">(one per line: names, roles, terms. Also helps the transcription spell them.)</span></label>
+    <textarea id="glossary" rows="5" placeholder="Josh: lab manager&#10;IPA: isopropyl alcohol (Formlabs wash)&#10;Form 4: our resin printer"></textarea>
+    <label for="preferences">Preferences <span class="hint">(how you like things written. "Remember" on a request adds it here.)</span></label>
+    <textarea id="preferences" rows="4" placeholder="- No emojis&#10;- Keep updates for Josh short"></textarea>
+    <label>Saved examples <span class="hint">(responses you liked: "Save as example" on a response. The newest 4 are used.)</span></label>
+    <div id="examples" class="examples"></div>
+    <div class="dialog-actions">
+      <button value="cancel" formnovalidate>Cancel</button>
+      <button value="save" class="primary">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="help">
   <form method="dialog">
     <h2>How to use</h2>
@@ -124,6 +144,7 @@
       <li><b>Add context</b> (optional): who's there, names and jargon. This fixes most misheard words.</li>
       <li><b>Ask</b> for what you want, or click a preset. You can ask mid-meeting; new transcript text is sent automatically with each request.</li>
       <li><b>Refine</b> with follow-ups ("shorter", "for Discord", "no emojis").</li>
+      <li><b>Teach it.</b> Click <b>Remember</b> on a request you'll always want ("no emojis"), and <b>Save as example</b> on a response you liked. Put names and jargon in <b>Memory</b>.</li>
     </ol>
     <p><b>No API key?</b> Type your request and click <b>Copy for Claude.ai</b>. It copies the transcript, context and request and opens Claude.ai: paste (Ctrl+V), send, and keep following up there. This uses your Claude subscription, not API credits.</p>
     <p>Everything is saved in the <code>meetings</code> folder: the audio, <code>transcript.txt</code>, and <code>notes.md</code> with every response. Reopen a meeting from <b>Past meetings</b>.</p>

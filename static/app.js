@@ -96,23 +96,45 @@ function renderChat(history) {
   const chat = $("chat");
   chat.querySelectorAll(".msg").forEach((m) => m.remove());
   chat.querySelector(".empty").hidden = history.length > 0;
-  history.forEach((m) => addMessage(m.role, m.text));
+  // Saved messages get the "learn from this" buttons.
+  history.forEach((m, i) => addMessage(m.role, m.text, i > 0 ? history[i - 1].text : null, true));
   chat.scrollTop = chat.scrollHeight;
 }
 
-function addMessage(role, text) {
+function toolButton(label, title, onClick) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = label;
+  b.title = title;
+  b.addEventListener("click", () => onClick(b));
+  return b;
+}
+
+function flash(button, text) {
+  const old = button.textContent;
+  button.textContent = text;
+  setTimeout(() => (button.textContent = old), 1500);
+}
+
+function addMessage(role, text, request = null, saved = false) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
   const body = document.createElement("div");
   body.textContent = text;
   div.append(body);
+  const tools = document.createElement("div");
+  tools.className = "tools";
   if (role === "assistant") {
-    const copy = document.createElement("button");
-    copy.className = "copy";
-    copy.textContent = "Copy";
-    copy.addEventListener("click", () => copyText(body.textContent, copy));
-    div.prepend(copy);
+    tools.append(toolButton("Copy", "Copy this response", (b) => copyText(body.textContent, b)));
+    if (saved && request) {
+      tools.append(toolButton("Save as example", "Use this response as a model for similar requests in future meetings",
+        async (b) => { await api("/api/memory/example", { request, output: body.textContent }); flash(b, "Saved"); }));
+    }
+  } else if (saved) {
+    tools.append(toolButton("Remember", "Add this request to your standing preferences, for every future meeting",
+      async (b) => { await api("/api/memory/preference", { text }); flash(b, "Remembered"); }));
   }
+  if (tools.children.length) role === "assistant" ? div.prepend(tools) : div.append(tools);
   $("chat").querySelector(".empty").hidden = true;
   $("chat").append(div);
   return body;
@@ -123,8 +145,7 @@ async function copyText(text, button) {
   const blocks = [...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)];
   const toCopy = blocks.length === 1 ? blocks[0][1].trimEnd() : text;
   await navigator.clipboard.writeText(toCopy);
-  button.textContent = blocks.length === 1 ? "Copied message" : "Copied";
-  setTimeout(() => (button.textContent = "Copy"), 1500);
+  flash(button, blocks.length === 1 ? "Copied message" : "Copied");
 }
 
 // ---- Polling ------------------------------------------------------------
@@ -213,14 +234,15 @@ async function ask(text) {
       out.textContent = `[${(await res.json()).error}]`;
     } else {
       $("ask").value = "";
-      out.textContent = "";
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
+      let raw = "";
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
         const nearBottom = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 40;
-        out.textContent += decoder.decode(value, { stream: true });
+        raw += decoder.decode(value, { stream: true });
+        showStreamed(out, raw);
         if (nearBottom) chat.scrollTop = chat.scrollHeight;
       }
     }
@@ -231,6 +253,22 @@ async function ask(text) {
     // the chat from it. If it failed, the error stays on screen.
     streaming = false;
     $("send").disabled = false;
+  }
+}
+
+// Progress notes arrive inside the stream as \x01note\x02 (e.g. "Reading section 2 of 5").
+// Show the latest one until the answer itself starts.
+function showStreamed(out, raw) {
+  const notes = [...raw.matchAll(/\x01([^\x02]*)\x02/g)];
+  const text = raw.replace(/\x01[^\x02]*\x02/g, "").replace(/\x01[^\x02]*$/, "");
+  if (text.trim() || !notes.length) {
+    out.textContent = text || "…";
+  } else {
+    out.innerHTML = "";
+    const note = document.createElement("span");
+    note.className = "status-note";
+    note.textContent = notes[notes.length - 1][1];
+    out.append(note);
   }
 }
 
@@ -322,13 +360,77 @@ async function openSettings() {
     : "System audio capture is Windows only. On Mac or Linux, record your mic, or upload the meeting's recording afterward.";
   $("whisper-info").textContent = lastState.whisper;
 
-  const models = await api("/api/ollama-models").catch(() => []);
-  const options = models.includes(s.ollama_model) || !s.ollama_model ? models : [s.ollama_model, ...models];
-  form.ollama_model.innerHTML = options.map((m) => `<option>${escapeHtml(m)}</option>`).join("");
-  form.ollama_model.value = s.ollama_model || models[0] || "";
-  $("ollama-hint").textContent = models.length ? "" : "Ollama isn't running or has no models. Install it from ollama.com, then run e.g. `ollama pull llama3.1:8b`.";
+  await refreshOllama(s.ollama_model);
   $("settings").showModal();
 }
+
+let recommended = null;
+
+async function refreshOllama(selected) {
+  const info = await api("/api/ollama").catch(() => ({ running: false, models: [], pull: {} }));
+  const models = info.models;
+  const options = models.includes(selected) || !selected ? models : [selected, ...models];
+  form.ollama_model.innerHTML = options.map((m) => `<option>${escapeHtml(m)}</option>`).join("");
+  form.ollama_model.value = selected || models[0] || "";
+  $("ollama-hint").textContent = !info.running
+    ? "Ollama isn't running. Install it from ollama.com and start it, then reopen Settings."
+    : models.length ? "" : "No models yet. Download the recommended one below.";
+  recommended = info.recommended;
+  if (recommended) {
+    const have = models.includes(recommended.model);
+    $("ollama-recommend").textContent = `Recommended for this computer (${recommended.hardware}): ` +
+      `${recommended.model}, ${recommended.size}${have ? " (installed)" : ""}`;
+    $("ollama-pull").hidden = have;
+  }
+  $("ollama-pull").disabled = !info.running || info.pull.running;
+  const p = info.pull;
+  $("ollama-pull-status").textContent = p.error || (p.model ? `${p.model}: ${p.status}` : "");
+  if (p.running) setTimeout(() => $("settings").open && refreshOllama(form.ollama_model.value), 1000);
+  else if (p.model && p.status.startsWith("Done") && selected !== p.model) form.ollama_model.value = p.model;
+}
+
+$("ollama-pull").addEventListener("click", async () => {
+  try {
+    await api("/api/ollama/pull", { model: recommended.model });
+    refreshOllama(recommended.model);
+  } catch (e) {
+    $("ollama-pull-status").textContent = e.message;
+  }
+});
+
+// ---- Memory -------------------------------------------------------------
+
+async function openMemory() {
+  const mem = await api("/api/memory");
+  $("glossary").value = mem.glossary;
+  $("preferences").value = mem.preferences;
+  renderExamples(mem.examples);
+  $("memory").showModal();
+}
+
+function renderExamples(examples) {
+  const list = $("examples");
+  list.innerHTML = examples.length ? "" : '<span class="hint">None saved yet.</span>';
+  examples.slice().reverse().forEach((e) => {
+    const row = document.createElement("div");
+    row.className = "example";
+    const label = document.createElement("span");
+    label.textContent = `${e.saved}: ${e.request}`;
+    label.title = e.output;
+    row.append(label, toolButton("Delete", "Forget this example", async () => {
+      renderExamples((await api("/api/memory/example/delete", { id: e.id })).examples);
+    }));
+    list.append(row);
+  });
+}
+
+$("memory-form").addEventListener("submit", async (e) => {
+  if (e.submitter && e.submitter.value !== "save") return;
+  await api("/api/memory", { glossary: $("glossary").value, preferences: $("preferences").value })
+    .catch((err) => showError(err.message));
+});
+
+$("open-memory").addEventListener("click", openMemory);
 
 form.addEventListener("submit", async (e) => {
   if (e.submitter && e.submitter.value !== "save") return;

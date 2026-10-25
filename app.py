@@ -16,6 +16,7 @@ from flask import Flask, Response, jsonify, request, send_from_directory
 from werkzeug.utils import secure_filename
 
 import config
+import memory
 import summarizer
 from recorder import Recorder, system_audio_supported
 from transcriber import Transcriber
@@ -24,6 +25,12 @@ app = Flask(__name__, static_folder="static", static_url_path="/static")
 transcriber = Transcriber()
 lock = threading.RLock()
 jobs = queue.Queue()
+
+
+SAVED_FIELDS = ("title", "context", "transcript", "history", "sent_transcript", "sent_context",
+                "system", "extractions", "language", "audio_seconds")
+# Marks a progress note inside the streamed reply; the page shows it and drops it from the text.
+STATUS_START, STATUS_END = "\x01", "\x02"
 
 
 class Meeting:
@@ -38,6 +45,8 @@ class Meeting:
         self.history = []          # [{"role", "text", "display", "raw"}]
         self.sent_transcript = ""  # what the model has already seen
         self.sent_context = ""
+        self.system = ""           # Claude instructions + memory, fixed when the chat starts
+        self.extractions = {}      # Ollama pass-1 notes per transcript section
         self.language = None
         self.audio_seconds = 0.0
         self.recorder = None
@@ -52,8 +61,7 @@ class Meeting:
     def load(cls, meeting_id):
         m = cls(meeting_id)
         data = json.loads((m.folder / "meeting.json").read_text(encoding="utf-8"))
-        for k in ("title", "context", "transcript", "history", "sent_transcript",
-                  "sent_context", "language", "audio_seconds"):
+        for k in SAVED_FIELDS:
             setattr(m, k, data.get(k, getattr(m, k)))
         return m
 
@@ -64,8 +72,7 @@ class Meeting:
         if self.is_empty() and not self.folder.exists():
             return
         self.folder.mkdir(parents=True, exist_ok=True)
-        data = {k: getattr(self, k) for k in ("title", "context", "transcript", "history", "sent_transcript",
-                                              "sent_context", "language", "audio_seconds")}
+        data = {k: getattr(self, k) for k in SAVED_FIELDS}
         (self.folder / "meeting.json").write_text(json.dumps(data, indent=1), encoding="utf-8")
         (self.folder / "transcript.txt").write_text(self.transcript, encoding="utf-8")
         notes = [f"# {self.title or self.id}\n"]
@@ -75,9 +82,10 @@ class Meeting:
 
     def whisper_prompt(self):
         # Whisper only reads the last ~220 tokens of a prompt, so keep it short:
-        # the context (names, jargon), then the end of the transcript so far.
+        # glossary and context (names, jargon), then the end of the transcript so far.
         recent = re.sub(r"^\[[\d:]+\] ", "", self.transcript[-400:], flags=re.M).replace("\n", " ")
-        return f"{self.context.strip()[:400]} {recent}".strip()
+        terms = memory.whisper_terms(memory.load())
+        return f"{terms} {self.context.strip()[:300]} {recent}".strip()
 
     def add_segment(self, start, text):
         line = f"[{int(start // 60):02d}:{int(start % 60):02d}] {text}"
@@ -199,7 +207,7 @@ def open_meeting():
 @app.post("/api/reset-chat")
 def reset_chat():
     with lock:
-        current.history, current.sent_transcript, current.sent_context = [], "", ""
+        current.history, current.sent_transcript, current.sent_context, current.system = [], "", "", ""
         current.save()
     return jsonify(ok=True)
 
@@ -274,18 +282,31 @@ def ask():
         transcript, context = m.transcript, m.context
         history = list(m.history)
         try:
+            # Built for every provider, so the chat can switch to Claude later and stay consistent.
             message = summarizer.build_user_message(
                 request_text, transcript, m.sent_transcript, context, m.sent_context)
         except summarizer.SummarizerError as e:
             return error(str(e))
+        live_system = summarizer.system_prompt(memory.prompt_section(memory.load()))
+        # Claude: the instructions (with memory) are fixed for the whole chat, because
+        # changing them mid-conversation would break its append-only history.
+        system = m.system or live_system
+
+    if settings["provider"] == "ollama":
+        source = summarizer.ollama_answer(settings, live_system, history, request_text,
+                                          transcript, context, m.extractions)
+    else:
+        source = summarizer.claude_stream(settings, system, history, message)
 
     def generate():
         parts, raw = [], None
         try:
-            for kind, value in summarizer.stream(settings, history, message):
+            for kind, value in source:
                 if kind == "text":
                     parts.append(value)
                     yield value
+                elif kind == "status":
+                    yield f"{STATUS_START}{value}{STATUS_END}"
                 else:
                     raw = value
         except summarizer.SummarizerError as e:
@@ -294,6 +315,9 @@ def ask():
         except Exception as e:
             yield f"\n\n[Unexpected error: {e}]"
             return
+        finally:
+            with lock:
+                m.save()  # keeps Ollama's section notes even if the final answer failed
         with lock:
             if m.history != history:
                 return  # chat was reset or changed while this was running
@@ -302,6 +326,8 @@ def ask():
                 {"role": "assistant", "text": "".join(parts), "display": "".join(parts), "raw": raw},
             ]
             m.sent_transcript, m.sent_context = transcript, context
+            if settings["provider"] != "ollama" and not m.system:
+                m.system = system
             m.save()
 
     return Response(generate(), mimetype="text/plain; charset=utf-8",
@@ -313,10 +339,41 @@ def copy_prompt():
     request_text = (request.get_json().get("request") or "").strip()
     with lock:
         try:
-            text = summarizer.copy_prompt(request_text, current.transcript, current.context)
+            system = summarizer.system_prompt(memory.prompt_section(memory.load()))
+            text = summarizer.copy_prompt(system, request_text, current.transcript, current.context)
         except summarizer.SummarizerError as e:
             return error(str(e))
     return jsonify(text=text)
+
+
+@app.get("/api/memory")
+def get_memory():
+    return jsonify(memory.load())
+
+
+@app.post("/api/memory")
+def save_memory():
+    data = request.get_json()
+    return jsonify(memory.update(data.get("glossary"), data.get("preferences")))
+
+
+@app.post("/api/memory/preference")
+def add_preference():
+    text = (request.get_json().get("text") or "").strip()
+    if not text:
+        return error("Nothing to remember.")
+    return jsonify(memory.add_preference(text))
+
+
+@app.post("/api/memory/example")
+def add_example():
+    data = request.get_json()
+    return jsonify(memory.add_example(data["request"], data["output"]))
+
+
+@app.post("/api/memory/example/delete")
+def delete_example():
+    return jsonify(memory.delete_example(request.get_json()["id"]))
 
 
 @app.post("/api/settings")
@@ -329,9 +386,35 @@ def save_settings():
     return jsonify(config.public(config.save(data)))
 
 
-@app.get("/api/ollama-models")
-def ollama_models():
-    return jsonify(summarizer.ollama_models(config.load()))
+@app.get("/api/ollama")
+def ollama_info():
+    models = summarizer.ollama_models(config.load())
+    return jsonify(running=models is not None, models=models or [],
+                   recommended=summarizer.recommend_ollama_model(), pull=pull)
+
+
+pull = {"model": "", "status": "", "running": False, "error": ""}
+
+
+@app.post("/api/ollama/pull")
+def ollama_pull():
+    model = request.get_json().get("model", "")
+    if pull["running"]:
+        return error("A download is already running.")
+    pull.update(model=model, status="Starting download…", running=True, error="")
+
+    def run():
+        try:
+            summarizer.ollama_pull(config.load(), model, lambda s: pull.update(status=s))
+            config.save({"ollama_model": model})
+            pull["status"] = "Done. Selected it as your Ollama model."
+        except summarizer.SummarizerError as e:
+            pull["error"] = str(e)
+        finally:
+            pull["running"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify(ok=True)
 
 
 def already_running():
