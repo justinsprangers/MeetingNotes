@@ -69,6 +69,10 @@ class Transcriber:
         self._fell_back_at = None  # time auto mode last fell back to CPU
         self.info = "not loaded yet (loads on first use; the first run downloads the model)"
 
+    @property
+    def on_gpu(self):
+        return self._model is not None and self.device == "cuda"
+
     def _load(self, settings):
         key = (settings["whisper_model"], settings["whisper_device"])
         if self._model is not None and self._key == key:

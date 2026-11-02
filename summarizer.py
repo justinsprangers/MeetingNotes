@@ -72,10 +72,13 @@ Skip small talk and side conversations. Use short bullet points and keep the [mm
 
 RECOMMENDED_MODELS = [
     # (model, download size, minimum GPU memory GB, or minimum system RAM GB)
-    # gemma4:12b only partly fits on an 8 GB card (36 of 49 layers), so it's slow there
-    # (459 s first answer on a 57-min meeting vs 140 s for qwen3.5:4b), but qwen invented
-    # deadlines and got facts wrong on the same meeting, so gemma stays the pick at 8 GB.
-    ("gemma4:12b", "7.7 GB", 7.5, 16),   # 7.5: "8 GB" cards report slightly under 8
+    # gemma4:12b only partly fits on an 8 GB card (36 of 49 layers), so it writes ~9 tok/s
+    # there; its QAT build and flash attention / q8 KV cache didn't change that. gemma4:e4b-it-qat
+    # fits fully (43/43 layers, 3.1 GB) and writes ~28 tok/s with about the same accuracy on
+    # the eval meeting and a real 57-min one. qwen3.5:4b is fast too but invented deadlines
+    # and facts, so it's only the fallback for small machines.
+    ("gemma4:12b", "7.7 GB", 11, 0),
+    ("gemma4:e4b-it-qat", "6.1 GB", 5.5, 16),
     ("qwen3.5:4b", "3.3 GB", 0, 0),
 ]
 
@@ -342,9 +345,17 @@ def _ollama_stream(settings, messages, num_ctx=None):
         r.close()  # Stop in the page: closing the connection makes Ollama stop generating
 
 
-def ollama_free_gpu(settings):
-    """Unload any model Ollama has loaded. Whisper needs the GPU: with gemma4:12b holding
-    ~7 GB of an 8 GB card, transcription slowed to a crawl and live transcripts fell behind."""
+WHISPER_GPU_GB = 2.0  # large-v3-turbo int8_float16 measured 1.2 GB loaded, plus room to decode
+
+
+def ollama_free_gpu(settings, need_gb=WHISPER_GPU_GB):
+    """Unload Ollama's models unless the GPU already has need_gb free. Whisper needs the GPU:
+    with gemma4:12b holding ~6 GB of an 8 GB card, transcription slowed to a crawl and live
+    transcripts fell behind. A model that fits alongside (gemma4:e4b, 3.1 GB) stays loaded,
+    so its pre-warmed transcript survives."""
+    free = _gpu_free_gb()
+    if free is not None and free >= need_gb:
+        return []
     base = settings["ollama_url"].rstrip("/")
     try:
         loaded = requests.get(base + "/api/ps", timeout=2).json().get("models", [])
@@ -391,6 +402,15 @@ def _gpu_memory_gb():
         return max(int(x) for x in out.split()) / 1024
     except (OSError, ValueError, subprocess.SubprocessError):
         return 0
+
+
+def _gpu_free_gb():
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5).stdout
+        return max(int(x) for x in out.split()) / 1024
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
 
 
 def _ram_gb():

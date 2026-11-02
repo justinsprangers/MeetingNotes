@@ -29,7 +29,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 - A summarizer, one of:
   - **Claude API:** a key from [console.anthropic.com](https://console.anthropic.com/). This is pay-as-you-go, billed separately from a Claude Pro/Max subscription.
   - **Claude.ai or another AI chat:** no setup. Use the **Copy for AI** button with your existing account (free or paid).
-  - **Ollama:** free, from [ollama.com](https://ollama.com/). Install and start it, then in the app's Settings click **Download** next to the recommended model: `gemma4:12b` (7.7 GB) on computers with an 8 GB+ GPU or 16 GB+ RAM, otherwise `qwen3.5:4b` (3.3 GB).
+  - **Ollama:** free, from [ollama.com](https://ollama.com/). Install and start it, then in the app's Settings click **Download** next to the recommended model: `gemma4:12b` (7.7 GB) with an 11 GB+ GPU, `gemma4:e4b-it-qat` (6.1 GB) with a 6–10 GB GPU or 16 GB+ RAM, otherwise `qwen3.5:4b` (3.3 GB).
 
 ## Install and run
 
@@ -80,9 +80,10 @@ Memory is stored in `memory.json` next to the app. Ollama and Copy for AI use it
 Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop RTX 4060 (8 GB):
 
 - **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
-- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, answers start within about 4 seconds and full notes finish in about 2 minutes (you can read as they stream). That's because the app has Ollama read the transcript in the background as soon as a recording or upload finishes, or when you click into the request box on a past or pasted meeting (about 20–40 seconds; the status line says so). Ask during that time and the answer just waits for it. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
-- **`qwen3.5:4b` is faster but not recommended for notes.** On the same meeting it made up owners, due dates, and decisions nobody made. gemma4:12b stuck to what was said.
-- Whisper and Ollama take turns on the GPU: before an Ollama request the app unloads Whisper, and before transcribing it tells Ollama to unload (on an 8 GB card, both at once made transcription crawl). Otherwise Ollama keeps the model loaded for 10 minutes after an answer so follow-ups are fast, and 15 minutes after reading a new transcript. With Ollama as your summarizer, asking mid-meeting works but each answer pauses live transcription while it runs; Copy for AI doesn't.
+- **Speed depends on whether the model fits in your GPU.** The text appears as fast as the model writes it. On an 8 GB card, `gemma4:12b` doesn't fit (part runs on the CPU) and writes about 9 words a second: full notes for a 57-minute meeting took about 2 minutes. `gemma4:e4b-it-qat` fits entirely and writes about 50 a second: the same notes in about 20 seconds, with about the same accuracy (on the test meeting it got all 7 action items, all 6 decisions, and all 4 approval items; on the real one it caught an action item 12b missed). So e4b is the pick for 6–10 GB GPUs.
+- **Reading the transcript first:** the app has Ollama read the transcript in the background as soon as a recording or upload finishes, or when you click into the request box on a past or pasted meeting (about 5–30 seconds; the status line says so), so answers start within a few seconds. Ask during that time and the answer just waits for it.
+- **`qwen3.5:4b` is fast but not recommended for notes.** On the same meeting it made up owners, due dates, and decisions nobody made. The gemma4 models stuck to what was said.
+- Whisper and Ollama share the GPU when both fit (e4b + Whisper leave 2 GB free on an 8 GB card). If not, before an Ollama request the app unloads Whisper, and before transcribing it tells Ollama to unload (on an 8 GB card, gemma4:12b and Whisper at once made transcription crawl). Otherwise Ollama keeps the model loaded for 10 minutes after an answer so follow-ups are fast, and 15 minutes after reading a new transcript. With Ollama as your summarizer, asking mid-meeting works but each answer pauses live transcription while it runs; Copy for AI doesn't.
 
 To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and compare its output with `eval/answer_key.md`.
 
@@ -111,8 +112,8 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | Setup failed partway | Check your internet connection and run `run.bat` again. If it keeps failing, delete the `.venv` folder and retry. |
 | Transcription is slow | On CPU, pick a smaller Whisper model in Settings (`base` or `tiny`). With an NVIDIA GPU, make sure Settings > Device shows CUDA (re-run setup by deleting `.venv`). |
 | The live transcript falls behind | The status line says how far behind and which device Whisper is on. Nothing is lost: the audio is saved and it catches up (faster decoding kicks in automatically). If it says "GPU unavailable" (common right after the laptop wakes from sleep), it retries the GPU every 2 minutes. `logs/meetingnotes.log` records timing per chunk. |
-| Ollama says it can't connect | Start Ollama, then download a model from Settings (or run `ollama pull gemma4:12b`) and pick it. |
-| Ollama is very slow | The model is too big for your GPU. A smaller one like `qwen3.5:4b` is faster but less accurate; for long meetings, Copy for AI is faster and better. |
+| Ollama says it can't connect | Start Ollama, then download a model from Settings (or run `ollama pull gemma4:e4b-it-qat`) and pick it. |
+| Ollama is very slow | The model is too big for your GPU. Use the one Settings recommends (`gemma4:e4b-it-qat` on an 8 GB GPU). Copy for AI is also fast. |
 | Names and terms come out wrong | Put them in Meeting context. |
 | The transcript repeats one word over and over | Whisper sometimes loops on silence or noise. The app now drops repeated and low-confidence lines (and stray "Thank you." filler) and stops feeding them back to Whisper. Check the mic level if it keeps happening. |
 | Notes name the wrong person | The transcript has no speaker names, so the summarizer only names someone when the words show who it was, and writes "[owner unclear]" otherwise. Say names out loud ("Ben, can you order the motors?"). On calls with system audio on, lines are labeled **Me** (your mic) or **Others** (the call). |

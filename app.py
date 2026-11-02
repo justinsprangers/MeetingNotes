@@ -222,7 +222,9 @@ def transcribe_job(meeting, source, offset, is_file, tracks):
         prompt = meeting.whisper_prompt()
         # Live chunks waiting behind this one: decode faster until caught up.
         fast = not is_file and meeting.pending > 1
-    freed = summarizer.ollama_free_gpu(settings)  # transcription gets the GPU first
+    # Transcription gets the GPU first. Measured with Whisper loaded: gemma4:e4b leaves 2.15 GB
+    # free (keep it), gemma4:12b leaves 0.01 GB (unload it).
+    freed = summarizer.ollama_free_gpu(settings, 0.5 if transcriber.on_gpu else summarizer.WHISPER_GPU_GB)
     if freed:
         log.info("Unloaded %s from Ollama to give Whisper the GPU", ", ".join(freed))
         with prewarm_lock:
