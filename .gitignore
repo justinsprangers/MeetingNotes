@@ -5,6 +5,7 @@ memory.json
 # Your meetings: audio, transcripts, notes
 meetings/
 eval/results/
+logs/
 
 # Python
 .venv/

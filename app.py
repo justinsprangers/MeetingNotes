@@ -4,6 +4,7 @@ it on this computer, and writes notes in whatever form you ask for.
 Start it with run.bat (Windows) or run.sh (Mac/Linux), or `python app.py`.
 """
 import json
+import logging
 import queue
 import re
 import socket
@@ -11,6 +12,7 @@ import sys
 import threading
 import webbrowser
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 
 import numpy as np
 from flask import Flask, Response, jsonify, request, send_from_directory
@@ -55,6 +57,7 @@ class Meeting:
         self.language = None
         self.audio_seconds = 0.0
         self.recorder = None
+        self.transcribed_to = 0.0  # live recording: audio seconds transcribed so far
         self.pending = 0
         self.error = ""
 
@@ -154,16 +157,20 @@ def worker():
         language = None if settings["language"] == "auto" else settings["language"]
         with lock:
             prompt = meeting.whisper_prompt()
+            # Live chunks waiting behind this one: decode faster until caught up.
+            fast = not is_file and meeting.pending > 1
         try:
             def on_segment(start, end, text):
                 with lock:
                     meeting.add_segment(start, text, speaker(tracks, start - offset, end - offset))
             lang, duration = transcriber.transcribe(
-                source, settings, offset, language or meeting.language, on_segment, prompt)
+                source, settings, offset, language or meeting.language, on_segment, prompt, fast)
             with lock:
                 meeting.language = meeting.language or lang
                 if is_file:
                     meeting.audio_seconds += duration
+                else:
+                    meeting.transcribed_to = offset + duration
         except Exception as e:
             with lock:
                 meeting.error = f"Transcription failed: {e}"
@@ -197,6 +204,8 @@ def state():
             "history": [{"role": t["role"], "text": t["display"]} for t in m.history],
             "recording": m.recorder is not None,
             "record_seconds": m.recorder.seconds if m.recorder else 0,
+            # How far the live transcript trails the recording (chunks are ~30 s, so ~30-60 s is normal).
+            "behind_seconds": max(0, m.audio_seconds + m.recorder.seconds - m.transcribed_to) if m.recorder else 0,
             "levels": m.recorder.levels() if m.recorder else {},
             "pending": m.pending,
             "copied": m.copied_transcript is not None,
@@ -279,7 +288,7 @@ def record_start():
         settings = config.load()
         m.folder.mkdir(parents=True, exist_ok=True)
         n = len(list(m.folder.glob("recording-*.wav"))) + 1
-        base = m.audio_seconds
+        base = m.transcribed_to = m.audio_seconds
 
         def on_chunk(audio, offset, tracks):
             with lock:
@@ -499,7 +508,19 @@ def already_running():
         return s.connect_ex(("127.0.0.1", config.PORT)) == 0
 
 
+def setup_logging():
+    # logs/meetingnotes.log (gitignored): Whisper device and per-chunk timing, for diagnosing slowdowns.
+    folder = config.APP_DIR / "logs"
+    folder.mkdir(exist_ok=True)
+    handler = RotatingFileHandler(folder / "meetingnotes.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+    log = logging.getLogger("meetingnotes")
+    log.setLevel(logging.INFO)
+    log.addHandler(handler)
+
+
 if __name__ == "__main__":
+    setup_logging()
     url = f"http://127.0.0.1:{config.PORT}"
     if already_running():
         print(f"Meeting Notes is already running. Opening {url}")
