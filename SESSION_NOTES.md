@@ -29,6 +29,7 @@
 - Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo on CUDA, small on CPU.
 
 ## Log
+- 2026-11-01: presets multi-select into one request ("- " lines + combine heading, editable); Discord/email presets reworded to work combined
 - 2026-10-25: Copy for AI + follow-up copies; Ollama single pass up to ~90 min (7.5 min → ~1.5 min on a 57-min meeting)
 - 2026-10-25: Whisper loop guard + filler filter, glossary-as-terms for Whisper, no-guess speaker rule + Me/Others labels, unload Whisper before Ollama, keep_alive 2m; qwen3.5:4b vs gemma4:12b compared (gemma kept)
 - 2026-10-25: Ollama installed; gemma4:12b eval; thinking off, glossary in extraction, single-pass up to ~15 min; eval/ folder

@@ -111,6 +111,7 @@ label { font-weight: 600; font-size: 14px; }
 
 .presets { display: flex; gap: 6px; flex-wrap: wrap; }
 .presets button { font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+.presets button.selected { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; min-height: 200px; }
 .empty { color: var(--muted); }
 .msg { border-radius: 8px; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

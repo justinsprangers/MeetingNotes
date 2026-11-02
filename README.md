@@ -46,7 +46,7 @@ The first transcription downloads the Whisper model (about 0.5 GB on CPU, 1.6 GB
 
 1. **Start a transcript.** Click **Record** before the meeting starts, or **Upload audio** (most audio and video files work), or paste a transcript (for example from Teams or Zoom) into the Transcript box.
 2. **Add context** (optional but worth it): who's there, their roles, project names, and jargon. Whisper uses it to spell names right, and the summarizer uses it to fix misheard words.
-3. **Ask** for what you want, or click a preset. You can ask while still recording.
+3. **Ask** for what you want, or click presets. Click several to combine them into one request (click again to remove one) and type extra instructions below them. You can ask while still recording.
 4. **Refine** with follow-ups. **Copy** on a response copies just the message when the response is a single code block (the Discord and email presets).
 
 **Without an API key:** type your request (or click a preset), then click **Copy for AI**. It copies the instructions, context, transcript and request as one message: paste it (Ctrl+V) into a new chat in Claude.ai, ChatGPT or any AI. The button then becomes **Copy follow-up**: click a preset or type a request and it copies just that (plus any transcript recorded since) to paste into the same chat. **New AI chat** copies everything again for a fresh chat; **Reset chat** also starts over.

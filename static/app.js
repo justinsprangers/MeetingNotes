@@ -5,9 +5,12 @@ const PRESETS = [
   ["Update for someone absent", "Write a short, quickly digestible update for someone who missed this meeting: key decisions, items that need their approval or input, and future plans and focus."],
   ["Action items", "List every action item as a checklist: task, owner, and due date when mentioned."],
   ["Decisions & open questions", "List the decisions that were made. Then, separately, list the open questions that were discussed but not decided."],
-  ["Format for Discord", "Format your last response as a Discord message in a single code block, under 2,000 characters, with no emojis."],
-  ["Format as email", "Turn your last response into a short, plain email with a subject line, in a single code block."],
+  // Worded to work alone (as a follow-up) or combined with the presets above.
+  ["Format for Discord", "Format the result as a Discord message in a single code block, under 2,000 characters, with no emojis."],
+  ["Format as email", "Format the result as a short, plain email with a subject line, in a single code block."],
 ];
+// Heading added when two or more presets are picked, so they come back as one response.
+const COMBINE = "Do all of the following in one response, each under its own heading:";
 
 const $ = (id) => document.getElementById(id);
 let meetingId = null;
@@ -236,6 +239,7 @@ async function ask(text) {
       out.textContent = `[${(await res.json()).error}]`;
     } else {
       $("ask").value = "";
+      syncPresets();
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let raw = "";
@@ -285,17 +289,38 @@ $("ask").addEventListener("keydown", (e) => {
   }
 });
 
+// Presets toggle on and off; each picked one is a "- " line in the request box,
+// above anything typed, so several combine into one request you can still edit.
+function togglePreset(prompt) {
+  const line = `- ${prompt}`;
+  const lines = $("ask").value.split("\n").filter((l) => l.trim() && l !== COMBINE);
+  const picked = new Set(PRESETS.map(([, p]) => `- ${p}`).filter((l) => lines.includes(l)));
+  picked.has(line) ? picked.delete(line) : picked.add(line);
+  const ordered = PRESETS.map(([, p]) => `- ${p}`).filter((l) => picked.has(l));
+  const typed = lines.filter((l) => !PRESETS.some(([, p]) => l === `- ${p}`));
+  $("ask").value = [...(ordered.length > 1 ? [COMBINE] : []), ...ordered, ...typed].join("\n");
+  syncPresets();
+  $("ask").focus();
+}
+
+function syncPresets() {
+  const lines = $("ask").value.split("\n");
+  $("presets").querySelectorAll("button").forEach((b) => {
+    const on = lines.includes(`- ${b.title}`);
+    b.classList.toggle("selected", on);
+    b.setAttribute("aria-pressed", on);
+  });
+}
+
 PRESETS.forEach(([label, prompt]) => {
   const b = document.createElement("button");
   b.type = "button";
   b.textContent = label;
   b.title = prompt;
-  b.addEventListener("click", () => {
-    $("ask").value = prompt;
-    $("ask").focus();
-  });
+  b.addEventListener("click", () => togglePreset(prompt));
   $("presets").append(b);
 });
+$("ask").addEventListener("input", syncPresets);
 
 // No API key needed: paste into any AI chat. The first copy carries the transcript;
 // after that, copies carry just the request (plus any new transcript) for the same chat.
@@ -317,6 +342,7 @@ async function copyForAI(restart) {
     const { text } = await api("/api/copy-prompt", { request: $("ask").value, restart });
     await navigator.clipboard.writeText(text);
     $("ask").value = "";
+    syncPresets();
     button.dataset.flashing = "1";
     button.textContent = "Copied: paste it (Ctrl+V)";
     setTimeout(() => { delete button.dataset.flashing; renderCopyButtons(lastState.copied); }, 3000);
