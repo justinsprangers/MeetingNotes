@@ -115,6 +115,7 @@ label { font-weight: 600; font-size: 14px; }
 .speakers { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; }
 .speakers button { font-size: 13px; padding: 2px 8px; border-radius: 999px; }
 .speakers button.unnamed { border-style: dashed; }
+.presets button.add-preset { border-style: dashed; color: var(--muted); }
 .presets button.selected { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .chat { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; min-height: 200px; }
 .empty { color: var(--muted); }

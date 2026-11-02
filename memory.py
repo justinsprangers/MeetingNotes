@@ -1,5 +1,5 @@
 """What the app learns from you, across meetings: a glossary of names and terms,
-standing preferences, and example outputs you liked.
+standing preferences, example outputs you liked, and your own quick prompts.
 
 Stored in memory.json next to the app (gitignored). It's added to the
 summarizer's instructions, and the glossary also helps Whisper spell names.
@@ -16,7 +16,7 @@ EXAMPLE_CHARS = 2500
 
 
 def load() -> dict:
-    data = {"glossary": "", "preferences": "", "examples": []}
+    data = {"glossary": "", "preferences": "", "examples": [], "presets": []}
     if PATH.exists():
         try:
             data.update(json.loads(PATH.read_text(encoding="utf-8")))
@@ -56,6 +56,19 @@ def add_example(request: str, output: str) -> dict:
 def delete_example(example_id: str) -> dict:
     data = load()
     data["examples"] = [e for e in data["examples"] if e["id"] != example_id]
+    return save(data)
+
+
+def add_preset(label: str, prompt: str) -> dict:
+    """A saved quick prompt: a button next to the built-in presets (not part of the summarizer's instructions)."""
+    data = load()
+    data["presets"].append({"id": uuid.uuid4().hex[:8], "label": label, "prompt": prompt})
+    return save(data)
+
+
+def delete_preset(preset_id: str) -> dict:
+    data = load()
+    data["presets"] = [p for p in data["presets"] if p["id"] != preset_id]
     return save(data)
 
 

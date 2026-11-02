@@ -2,7 +2,7 @@
 
 ## Status
 - Record (mic + Windows system audio), upload, or paste → live local Whisper transcript with voice speaker labels → chat-style requests with multi-select presets. Summarize with the Claude API, Ollama (gemma4:e4b-it-qat, the user's setting since 2026-11-02), or **Copy for AI** (the user's main no-cost path; first copy = everything, then "Copy follow-up" = request + new transcript). Meetings are saved and reopenable.
-- Memory: glossary, preferences, saved examples, remembered voices.
+- Memory: glossary, preferences, saved examples, saved quick prompts (custom preset buttons), remembered voices.
 - Ollama: thinking off, single pass up to 80k chars (~80 min, untested near the top), two-pass beyond; pre-warmed after transcription (first text ~4 s on a 57-min meeting, full notes ~2 min); keep_alive 10 min; unloaded whenever Whisper needs the GPU.
 - Speaker labels (2026-11-01): 10/25 meeting → 7 voices, Sebastian's lines consistent; a named voice was recognized in a separate recording; the 11/01 recording (poor audio) splits into many small speakers. Live path: 10 min of chunks in 100 s with labels.
 - Live-transcript stall (11/01, 83 min, finished 26 min after stop): GPU replay runs 25x real time, so Whisper was on CPU or starved of GPU. Fixed causes: Ollama holding the GPU (reproduced), sticky CPU fallback (GPU retry), and the transcript box freezing while focused (review finding). Now shows "N behind" and logs per-chunk timing to `logs/meetingnotes.log`.
@@ -24,6 +24,7 @@
 - Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo (int8_float16) on CUDA, small on CPU.
 
 ## Log
+- 2026-11-02: saved quick prompts ("+ Save quick prompt", stored in memory.json, delete in Memory); browser-tested save, combine, reload, delete
 - 2026-11-02: switched Ollama default to gemma4:e4b-it-qat (~5× faster answers); Ollama stays loaded during transcription when both fit on the GPU
 - 2026-11-02: verified Whisper unload frees VRAM and int8_float16 accuracy; Ollama flash attention + q8 KV benchmarked, no gain, reverted
 - 2026-11-01: Stop button, "reading" status, real token count sizing (78k chars = 22.9k tokens fits), pre-warm on request-box focus (once per transcript), one-click notes after transcription, polling sends transcript only on change (54 KB → 0.7 KB/s), transcript type validation

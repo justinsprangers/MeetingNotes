@@ -399,13 +399,18 @@ $("ask").addEventListener("keydown", (e) => {
 
 // Presets toggle on and off; each picked one is a "- " line in the request box,
 // above anything typed, so several combine into one request you can still edit.
+// Saved quick prompts (Memory) work the same way, after the built-in ones.
+let customPresets = [];
+const allPrompts = () => [...PRESETS.map(([, p]) => p), ...customPresets.map((p) => p.prompt)];
+
 function togglePreset(prompt) {
   const line = `- ${prompt}`;
+  const presetLines = allPrompts().map((p) => `- ${p}`);
   const lines = $("ask").value.split("\n").filter((l) => l.trim() && l !== COMBINE);
-  const picked = new Set(PRESETS.map(([, p]) => `- ${p}`).filter((l) => lines.includes(l)));
+  const picked = new Set(presetLines.filter((l) => lines.includes(l)));
   picked.has(line) ? picked.delete(line) : picked.add(line);
-  const ordered = PRESETS.map(([, p]) => `- ${p}`).filter((l) => picked.has(l));
-  const typed = lines.filter((l) => !PRESETS.some(([, p]) => l === `- ${p}`));
+  const ordered = presetLines.filter((l) => picked.has(l));
+  const typed = lines.filter((l) => !presetLines.includes(l));
   $("ask").value = [...(ordered.length > 1 ? [COMBINE] : []), ...ordered, ...typed].join("\n");
   syncPresets();
   $("ask").focus();
@@ -413,21 +418,70 @@ function togglePreset(prompt) {
 
 function syncPresets() {
   const lines = $("ask").value.split("\n");
-  $("presets").querySelectorAll("button").forEach((b) => {
-    const on = lines.includes(`- ${b.title}`);
+  $("presets").querySelectorAll("button[data-prompt]").forEach((b) => {
+    const on = lines.includes(`- ${b.dataset.prompt}`);
     b.classList.toggle("selected", on);
     b.setAttribute("aria-pressed", on);
   });
 }
 
-PRESETS.forEach(([label, prompt]) => {
+function presetButton(label, prompt, title = prompt) {
   const b = document.createElement("button");
   b.type = "button";
   b.textContent = label;
-  b.title = prompt;
+  b.title = title;
+  b.dataset.prompt = prompt;
   b.addEventListener("click", () => togglePreset(prompt));
-  $("presets").append(b);
-});
+  return b;
+}
+
+function renderPresets() {
+  const row = $("presets");
+  row.innerHTML = "";
+  PRESETS.forEach(([label, prompt]) => row.append(presetButton(label, prompt)));
+  customPresets.forEach((p) => {
+    const b = presetButton(p.label, p.prompt, `${p.prompt}\n\nYour saved quick prompt. Delete it in Memory.`);
+    b.classList.add("custom");
+    row.append(b);
+  });
+  const add = document.createElement("button");
+  add.type = "button";
+  add.className = "add-preset";
+  add.textContent = "+ Save quick prompt";
+  add.title = "Save what you've typed in the request box as a button for future meetings";
+  add.addEventListener("click", savePreset);
+  row.append(add);
+  syncPresets();
+}
+
+// Saves the typed part of the request box (not the picked presets) as a new button.
+async function savePreset() {
+  const presetLines = allPrompts().map((p) => `- ${p}`);
+  const typed = $("ask").value.split("\n").filter((l) => l.trim() && l !== COMBINE && !presetLines.includes(l));
+  let prompt = typed.join(" ").trim();
+  if (!prompt) {
+    prompt = (window.prompt("What should this quick prompt ask for?\n(Tip: type it in the request box first, then click + Save quick prompt.)") || "").trim();
+    if (!prompt) return;
+  }
+  const words = prompt.replace(/^- /, "").split(/\s+/);
+  const guess = words.slice(0, 4).join(" ") + (words.length > 4 ? "…" : "");
+  const label = (window.prompt(`Button name for:\n"${prompt}"`, guess) || "").trim();
+  if (!label) return;
+  try {
+    customPresets = (await api("/api/memory/preset", { label, prompt })).presets;
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+  // Turn the typed text into the new button's line, so it shows as picked.
+  const saved = customPresets[customPresets.length - 1].prompt;
+  $("ask").value = $("ask").value.split("\n").filter((l) => !typed.includes(l)).join("\n");
+  renderPresets();
+  togglePreset(saved);
+}
+
+renderPresets();
+api("/api/memory").then((mem) => { customPresets = mem.presets || []; renderPresets(); }).catch(() => {});
 $("ask").addEventListener("input", syncPresets);
 
 // No API key needed: paste into any AI chat. The first copy carries the transcript;
@@ -560,6 +614,7 @@ async function openMemory() {
   $("glossary").value = mem.glossary;
   $("preferences").value = mem.preferences;
   renderExamples(mem.examples);
+  renderQuickPrompts(mem.presets || []);
   renderVoices(await api("/api/voices").catch(() => []));
   $("memory").showModal();
 }
@@ -575,6 +630,24 @@ function renderExamples(examples) {
     label.title = e.output;
     row.append(label, toolButton("Delete", "Forget this example", async () => {
       renderExamples((await api("/api/memory/example/delete", { id: e.id })).examples);
+    }));
+    list.append(row);
+  });
+}
+
+function renderQuickPrompts(presets) {
+  const list = $("quick-prompts");
+  list.innerHTML = presets.length ? "" : '<span class="hint">None saved yet. Type a request, then click "+ Save quick prompt".</span>';
+  presets.forEach((p) => {
+    const row = document.createElement("div");
+    row.className = "example";
+    const label = document.createElement("span");
+    label.textContent = `${p.label}: ${p.prompt}`;
+    label.title = p.prompt;
+    row.append(label, toolButton("Delete", "Remove this quick prompt", async () => {
+      customPresets = (await api("/api/memory/preset/delete", { id: p.id })).presets;
+      renderQuickPrompts(customPresets);
+      renderPresets();
     }));
     list.append(row);
   });

@@ -71,6 +71,7 @@ The app gets better the more you use it:
 
 - **Glossary:** in **Memory**, list names, roles, and terms, one per line (`Josh: lab manager`). The summarizer uses them to fix misheard words, and Whisper uses them to spell names right.
 - **Remember:** click it under a request you'll always want ("no emojis", "keep updates short"). It's added to your standing preferences.
+- **Quick prompts:** type a request you'll reuse, then click **+ Save quick prompt** (at the end of the preset buttons) and give it a short name. It becomes a button that works like the built-in presets (click several to combine). Delete them in **Memory**.
 - **Save as example:** click it on a response you liked. Future responses to similar requests copy its structure and tone. The newest 4 examples are used.
 
 Memory is stored in `memory.json` next to the app. Ollama and Copy for AI use it right away; a Claude API chat picks up changes from the next new chat (**New meeting** or **Reset chat**).

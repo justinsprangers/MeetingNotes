@@ -652,6 +652,21 @@ def delete_example():
     return jsonify(memory.delete_example(request.get_json()["id"]))
 
 
+@app.post("/api/memory/preset")
+def add_preset():
+    data = request.get_json()
+    label = " ".join(str(data.get("label") or "").split())[:40]
+    prompt = " ".join(str(data.get("prompt") or "").split())  # one line: presets are "- " lines in the request box
+    if not label or not prompt:
+        return error("A quick prompt needs a name and what it asks for.")
+    return jsonify(memory.add_preset(label, prompt))
+
+
+@app.post("/api/memory/preset/delete")
+def delete_preset():
+    return jsonify(memory.delete_preset(request.get_json()["id"]))
+
+
 @app.post("/api/settings")
 def save_settings():
     data = request.get_json()
