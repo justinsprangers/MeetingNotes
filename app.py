@@ -20,12 +20,15 @@ from werkzeug.utils import secure_filename
 
 import config
 import memory
+import speakers
 import summarizer
 from recorder import ACTIVE_LEVEL, RATE, Recorder, system_audio_supported
-from transcriber import Transcriber
+from transcriber import Transcriber, decode_audio
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 transcriber = Transcriber()
+tagger = speakers.VoiceTagger()
+log = logging.getLogger("meetingnotes")
 lock = threading.RLock()
 jobs = queue.Queue()
 
@@ -34,8 +37,17 @@ SAVED_FIELDS = ("title", "context", "transcript", "history", "sent_transcript", 
                 "system", "extractions", "language", "audio_seconds", "copied_transcript", "copied_context")
 # Marks a progress note inside the streamed reply; the page shows it and drops it from the text.
 STATUS_START, STATUS_END = "\x01", "\x02"
-# "[12:34] " plus an optional "Me: "/"Others: " speaker label.
-LINE_PREFIX = re.compile(r"^\[[\d:]+\] (?:(?:Me|Others): )?", re.M)
+# "[12:34] " plus an optional speaker label ("Speaker 2: ", "Avanish: ", "Me: ").
+LINE_PREFIX = re.compile(r"^\[[\d:]+\] (?:[A-Z][\w .'&()-]{0,39}: )?", re.M)
+REGROUP_EVERY = 20  # new voiced lines between speaker regroups while recording (~0.1 s each)
+SPEAKER_NAME = re.compile(r"^[^\s:\n\[\]][^:\n\[\]]{0,39}$")
+_LINE = re.compile(r"^(\[[\d:]+\] )(?:([A-Z][\w .'&()-]{0,39}): )?(.*)$", re.S)
+
+
+def split_line(line):
+    """'[12:34] Avanish: text' -> ('[12:34] ', 'Avanish', 'text'); None if not a transcript line."""
+    m = _LINE.match(line)
+    return (m.group(1), m.group(2), m.group(3)) if m else None
 
 
 class Meeting:
@@ -54,9 +66,13 @@ class Meeting:
         self.extractions = {}      # Ollama pass-1 notes per transcript section
         self.copied_transcript = None  # what "Copy for AI" already put in an external chat
         self.copied_context = None
+        self.pending_copy = None       # (transcript, context, restart) until the clipboard write is confirmed
+        self.prints = []           # (line without its label, voiceprint) per labeled line; voiceprints.npz
+        self.regrouped_at = 0      # len(prints) at the last speaker regroup
         self.language = None
         self.audio_seconds = 0.0
         self.recorder = None
+        self.stopping = False      # Stop clicked, final chunk not queued yet
         self.transcribed_to = 0.0  # live recording: audio seconds transcribed so far
         self.pending = 0
         self.error = ""
@@ -71,6 +87,9 @@ class Meeting:
         data = json.loads((m.folder / "meeting.json").read_text(encoding="utf-8"))
         for k in SAVED_FIELDS:
             setattr(m, k, data.get(k, getattr(m, k)))
+        if (m.folder / "voiceprints.npz").exists():
+            z = np.load(m.folder / "voiceprints.npz")
+            m.prints = list(zip(z["lines"].tolist(), z["vectors"]))
         return m
 
     def is_empty(self):
@@ -87,6 +106,34 @@ class Meeting:
         for user, reply in zip(self.history[::2], self.history[1::2]):
             notes.append(f"## {user['display']}\n\n{reply['text']}\n")
         (self.folder / "notes.md").write_text("\n".join(notes), encoding="utf-8")
+        if self.prints:
+            np.savez(self.folder / "voiceprints.npz", lines=[p[0] for p in self.prints],
+                     vectors=np.array([p[1] for p in self.prints], np.float32))
+
+    def labeled_prints(self):
+        """Transcript lines that have a voiceprint: (raw lines, parsed lines, line indexes,
+        voiceprints, current labels). Lines the user has since edited won't match."""
+        raw = self.transcript.split("\n")
+        parts = [split_line(l) for l in raw]
+        where = {}
+        for i, p in enumerate(parts):
+            if p:
+                where.setdefault(p[0] + p[2], i)
+        found = [(where[key], v) for key, v in self.prints if key in where]
+        idx = [i for i, _ in found]
+        X = np.array([v for _, v in found]) if found else np.zeros((0, 256))
+        return raw, parts, idx, X, [parts[i][1] for i in idx]
+
+    def regroup_speakers(self):
+        """Regroup the whole meeting's voiceprints and relabel lines (see speakers.regroup)."""
+        raw, parts, idx, X, labels = self.labeled_prints()
+        self.regrouped_at = len(self.prints)
+        if len(idx) < speakers.WARMUP_LINES:
+            return
+        for i, label in zip(idx, speakers.regroup(X, labels, speakers.load_known())):
+            tag, _, text = parts[i]
+            raw[i] = tag + (f"{label}: " if label else "") + text
+        self.transcript = "\n".join(raw)
 
     def whisper_prompt(self):
         # Whisper only reads the last ~220 tokens of a prompt, so keep it short:
@@ -98,13 +145,15 @@ class Meeting:
         terms = memory.whisper_terms(memory.load())
         return f"{terms} {self.context.strip()[:300]} {recent}".strip()
 
-    def add_segment(self, start, text, speaker=None):
+    def add_segment(self, start, text, speaker=None, voiceprint=None):
         last = self.transcript.rsplit("\n", 1)[-1]
         if LINE_PREFIX.sub("", last).lower() == text.lower():
             return  # the same line again is almost always Whisper repeating itself
+        tag = f"[{int(start // 60):02d}:{int(start % 60):02d}] "
         label = f"{speaker}: " if speaker else ""
-        line = f"[{int(start // 60):02d}:{int(start % 60):02d}] {label}{text}"
-        self.transcript += ("\n" if self.transcript else "") + line
+        self.transcript += ("\n" if self.transcript else "") + tag + label + text
+        if voiceprint is not None:
+            self.prints.append((tag + text, voiceprint))
 
 
 current = Meeting.new()
@@ -149,36 +198,79 @@ def start_prewarm(meeting):
     threading.Thread(target=run, daemon=True).start()
 
 
-def worker():
-    """Transcribes queued audio one job at a time so the transcript stays in order."""
-    while True:
-        meeting, source, offset, is_file, tracks = jobs.get()
-        settings = config.load()
-        language = None if settings["language"] == "auto" else settings["language"]
-        with lock:
-            prompt = meeting.whisper_prompt()
-            # Live chunks waiting behind this one: decode faster until caught up.
-            fast = not is_file and meeting.pending > 1
-        try:
-            def on_segment(start, end, text):
+def transcribe_job(meeting, source, offset, is_file, tracks):
+    settings = config.load()
+    language = None if settings["language"] == "auto" else settings["language"]
+    with lock:
+        prompt = meeting.whisper_prompt()
+        # Live chunks waiting behind this one: decode faster until caught up.
+        fast = not is_file and meeting.pending > 1
+    freed = summarizer.ollama_free_gpu(settings)  # transcription gets the GPU first
+    if freed:
+        log.info("Unloaded %s from Ollama to give Whisper the GPU", ", ".join(freed))
+        prewarm["status"] = ""
+    by_voice = settings["speaker_labels"]
+    if by_voice and is_file:
+        source = decode_audio(source, sampling_rate=speakers.RATE)  # need the samples for voiceprints
+
+    def on_segment(start, end, text):
+        label = v = None
+        if by_voice:
+            a, b = int((start - offset) * speakers.RATE), int((end - offset) * speakers.RATE)
+            v = tagger.voiceprint(source[a:b])  # outside the lock: ~70 ms
+            if v is not None:
                 with lock:
-                    meeting.add_segment(start, text, speaker(tracks, start - offset, end - offset))
-            lang, duration = transcriber.transcribe(
-                source, settings, offset, language or meeting.language, on_segment, prompt, fast)
-            with lock:
-                meeting.language = meeting.language or lang
-                if is_file:
-                    meeting.audio_seconds += duration
-                else:
-                    meeting.transcribed_to = offset + duration
+                    _, _, _, X, labels = meeting.labeled_prints()
+                label = speakers.assign_live(X, labels, v)
+        else:
+            label = speaker(tracks, start - offset, end - offset)
+        with lock:
+            meeting.add_segment(start, text, label, v)
+
+    lang, duration = transcriber.transcribe(
+        source, settings, offset, language or meeting.language, on_segment, prompt, fast)
+    with lock:
+        meeting.language = meeting.language or lang
+        if is_file:
+            meeting.audio_seconds += duration
+        else:
+            meeting.transcribed_to = offset + duration
+            if len(meeting.prints) - meeting.regrouped_at >= REGROUP_EVERY:
+                meeting.regroup_speakers()  # mid-meeting: fix live guesses, apply names
+
+
+def finish_if_done(meeting):
+    """Once a recording or upload is fully transcribed: final speaker regroup, save, pre-warm.
+    Call with the lock held; returns True if the caller should start the pre-warm."""
+    done = not (meeting.pending or meeting.recorder or meeting.stopping or meeting.error)
+    if done and meeting.prints:
+        try:
+            meeting.regroup_speakers()
+        except Exception:
+            log.exception("Regrouping speakers failed; keeping the live labels")
+    try:
+        meeting.save()
+    except OSError as e:  # e.g. a sync client or antivirus holding the file
+        meeting.error = f"Couldn't save the meeting: {e}"
+    return done
+
+
+def worker():
+    """Transcribes queued audio one job at a time so the transcript stays in order.
+    Nothing may escape this loop: a dead worker would leave every later chunk queued forever."""
+    while True:
+        job = jobs.get()
+        meeting = job[0]
+        try:
+            transcribe_job(*job)
         except Exception as e:
+            log.exception("Transcription failed")
             with lock:
                 meeting.error = f"Transcription failed: {e}"
         finally:
             with lock:
                 meeting.pending -= 1
-                meeting.save()
-                done = not (meeting.pending or meeting.recorder or meeting.error)
+                done = finish_if_done(meeting)
             if done:
                 start_prewarm(meeting)
 
@@ -209,6 +301,8 @@ def state():
             "levels": m.recorder.levels() if m.recorder else {},
             "pending": m.pending,
             "copied": m.copied_transcript is not None,
+            "speakers": speaker_list(m),
+            "voice_error": tagger.error,
             "prewarm": prewarm["status"] if prewarm["meeting"] == m.id else "",
             "error": m.error,
             "whisper": transcriber.info,
@@ -222,7 +316,7 @@ def update_meeting():
     data = request.get_json()
     with lock:
         m = current
-        if "transcript" in data and (m.recorder or m.pending):
+        if "transcript" in data and (m.recorder or m.pending or m.stopping):
             return error("Wait for recording and transcription to finish before editing.")
         for k in ("title", "context", "transcript"):
             if k in data:
@@ -230,6 +324,54 @@ def update_meeting():
         m.error = ""
         m.save()
     return jsonify(ok=True)
+
+
+def speaker_list(m):
+    """Speakers in this meeting's transcript, most lines first, with a sample line to recognize them by."""
+    if not m.prints:
+        return []
+    known = speakers.load_known()
+    by_label = {}
+    for line in m.transcript.splitlines():
+        p = split_line(line)
+        if p and p[1] and p[1] not in ("Me", "Others"):
+            by_label.setdefault(p[1], []).append(line)
+    return sorted(({"label": label, "lines": len(lines), "sample": max(lines[:40], key=len),
+                    "named": label in known} for label, lines in by_label.items()), key=lambda s: -s["lines"])
+
+
+@app.post("/api/speaker")
+def rename_speaker():
+    """Name a speaker ("Speaker 2" -> "Avanish") in this meeting and remember their voice.
+    Giving two labels the same name merges them (one person split into two)."""
+    data = request.get_json()
+    old, new = data.get("from", ""), " ".join((data.get("to") or "").split())
+    if not SPEAKER_NAME.match(new):
+        return error("Use a short name without colons or brackets.")
+    with lock:
+        m = current
+        if new == old:
+            return jsonify(ok=True)
+        _, _, _, X, labels = m.labeled_prints()
+        if old not in labels:
+            return error("That speaker isn't in this meeting.")
+        m.transcript = re.sub(rf"^(\[[\d:]+\] ){re.escape(old)}: ", lambda x: f"{x.group(1)}{new}: ",
+                              m.transcript, flags=re.M)
+        if not new.startswith("Speaker "):
+            speakers.remember(new, speakers.voice_of(X, labels, old))
+        m.save()
+    return jsonify(ok=True)
+
+
+@app.get("/api/voices")
+def list_voices():
+    return jsonify(sorted(speakers.load_known()))
+
+
+@app.post("/api/voices/forget")
+def forget_voice():
+    speakers.forget(request.get_json().get("name", ""))
+    return jsonify(sorted(speakers.load_known()))
 
 
 @app.post("/api/new")
@@ -312,11 +454,15 @@ def record_stop():
     with lock:
         m = current
         rec, m.recorder = m.recorder, None
+        m.stopping = bool(rec)  # until the final chunk is queued, the meeting isn't done
     if rec:
         rec.stop()  # outside the lock: stopping flushes a final chunk, which takes the lock
         with lock:
             m.audio_seconds += rec.seconds
-            m.save()
+            m.stopping = False
+            done = finish_if_done(m)
+        if done:
+            start_prewarm(m)
     return jsonify(ok=True)
 
 
@@ -414,10 +560,8 @@ def copy_prompt():
     request_text = (data.get("request") or "").strip()
     with lock:
         m = current
-        if data.get("restart"):
-            m.copied_transcript = m.copied_context = None
         try:
-            if m.copied_transcript is None:
+            if m.copied_transcript is None or data.get("restart"):
                 system = summarizer.system_prompt(memory.prompt_section(memory.load()))
                 text = summarizer.copy_prompt(system, request_text, m.transcript, m.context)
             else:
@@ -427,9 +571,21 @@ def copy_prompt():
                     request_text, m.transcript, m.copied_transcript, m.context, m.copied_context)
         except summarizer.SummarizerError as e:
             return error(str(e))
-        m.copied_transcript, m.copied_context = m.transcript, m.context
-        m.save()
+        # Counts as copied only once the page confirms the clipboard write worked;
+        # otherwise the next click would send a follow-up without the transcript.
+        m.pending_copy = (m.transcript, m.context, data.get("restart"))
     return jsonify(text=text)
+
+
+@app.post("/api/copy-prompt/confirm")
+def confirm_copy():
+    with lock:
+        m = current
+        if m.pending_copy:
+            m.copied_transcript, m.copied_context, _ = m.pending_copy
+            m.pending_copy = None
+            m.save()
+    return jsonify(ok=True)
 
 
 @app.get("/api/memory")

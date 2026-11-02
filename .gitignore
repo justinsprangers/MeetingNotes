@@ -1,6 +1,8 @@
 # Your API key, preferences, and what the app learned from you
 settings.json
 memory.json
+voices.json
+models/
 
 # Your meetings: audio, transcripts, notes
 meetings/

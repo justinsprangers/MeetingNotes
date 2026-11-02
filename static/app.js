@@ -66,10 +66,14 @@ function render(s) {
   const busy = s.recording || s.pending > 0;
   const t = $("transcript");
   t.readOnly = busy;
-  if (busy || document.activeElement !== t) {
+  if (busy) {
+    // Read-only while transcribing, so always show new text, even if the box has focus
+    // (clicking in to scroll or copy used to freeze the live transcript).
     const atBottom = t.scrollTop + t.clientHeight >= t.scrollHeight - 20;
+    if (t.value !== s.transcript) t.value = s.transcript;
+    if (atBottom) t.scrollTop = t.scrollHeight;
+  } else if (document.activeElement !== t) {
     setField(t, s.transcript);
-    if (busy && atBottom) t.scrollTop = t.scrollHeight;
   }
 
   const rec = $("record");
@@ -93,6 +97,7 @@ function render(s) {
     `<span>${name}<span class="meter"><span style="width:${Math.min(100, level * 400)}%"></span></span></span>`).join("");
   showError(s.error);
   renderCopyButtons(s.copied);
+  renderSpeakers(s.speakers, s.voice_error);
 
   if (!streaming && s.history.length !== historyLength) {
     historyLength = s.history.length;
@@ -102,11 +107,14 @@ function render(s) {
 
 function renderChat(history) {
   const chat = $("chat");
+  const top = chat.scrollTop;
+  const nearBottom = chat.scrollTop + chat.clientHeight >= chat.scrollHeight - 40;
   chat.querySelectorAll(".msg").forEach((m) => m.remove());
   chat.querySelector(".empty").hidden = history.length > 0;
   // Saved messages get the "learn from this" buttons.
   history.forEach((m, i) => addMessage(m.role, m.text, i > 0 ? history[i - 1].text : null, true));
-  chat.scrollTop = chat.scrollHeight;
+  // Don't yank someone reading the top of a long answer down to the bottom.
+  chat.scrollTop = nearBottom ? chat.scrollHeight : top;
 }
 
 function toolButton(label, title, onClick) {
@@ -154,6 +162,56 @@ async function copyText(text, button) {
   const toCopy = blocks.length === 1 ? blocks[0][1].trimEnd() : text;
   await navigator.clipboard.writeText(toCopy);
   flash(button, blocks.length === 1 ? "Copied message" : "Copied");
+}
+
+// ---- Speakers -----------------------------------------------------------
+
+let speakersKey = "";
+
+function renderSpeakers(list, voiceError) {
+  const key = JSON.stringify([list, voiceError]);
+  if (key === speakersKey) return;  // redraw only on change (the page polls every second)
+  speakersKey = key;
+  const bar = $("speakers");
+  bar.hidden = !list.length && !voiceError;
+  bar.innerHTML = "";
+  if (voiceError) bar.append(Object.assign(document.createElement("span"), { className: "hint", textContent: voiceError }));
+  if (!list.length) return;
+  const unnamed = list.some((s) => s.label.startsWith("Speaker "));
+  bar.append(Object.assign(document.createElement("span"), { className: "hint",
+    textContent: unnamed ? "Who's who? Click a speaker to name them:" : "Speakers:" }));
+  list.forEach((s) => {
+    const b = toolButton(`${s.label} (${s.lines})`, `Example line:\n${s.sample}\n\nClick to name or rename.`,
+      () => renameSpeaker(s.label));
+    if (s.label.startsWith("Speaker ")) b.classList.add("unnamed");
+    bar.append(b);
+  });
+}
+
+async function renameSpeaker(label) {
+  const name = prompt(`Who is ${label}? Their lines will be relabeled and their voice remembered for future meetings. ` +
+    "Use a name that's already listed to merge two speakers.", label.startsWith("Speaker ") ? "" : label);
+  if (!name || name.trim() === label) return;
+  try {
+    await saveNow();
+    await api("/api/speaker", { from: label, to: name.trim() });
+    $("transcript").blur();  // let the next poll show the relabeled transcript
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+async function renderVoices(names) {
+  const list = $("voices");
+  list.innerHTML = names.length ? "" : '<span class="hint">None yet.</span>';
+  names.forEach((name) => {
+    const row = document.createElement("div");
+    row.className = "example";
+    row.append(Object.assign(document.createElement("span"), { textContent: name }),
+      toolButton("Forget", "Delete this person's saved voice", async () =>
+        renderVoices(await api("/api/voices/forget", { name }))));
+    list.append(row);
+  });
 }
 
 // ---- Polling ------------------------------------------------------------
@@ -343,7 +401,8 @@ async function copyForAI(restart) {
   try {
     await saveNow();
     const { text } = await api("/api/copy-prompt", { request: $("ask").value, restart });
-    await navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(text);  // throws if the page lost focus: then nothing counts as copied
+    await api("/api/copy-prompt/confirm", {});
     $("ask").value = "";
     syncPresets();
     button.dataset.flashing = "1";
@@ -400,6 +459,7 @@ async function openSettings() {
   form.whisper_model.value = s.whisper_model;
   form.whisper_device.value = s.whisper_device;
   form.language.value = s.language;
+  form.speaker_labels.checked = s.speaker_labels;
   form.record_microphone.checked = s.record_microphone;
   form.record_system_audio.checked = s.record_system_audio;
   form.record_system_audio.disabled = !lastState.system_audio_supported;
@@ -452,6 +512,7 @@ async function openMemory() {
   $("glossary").value = mem.glossary;
   $("preferences").value = mem.preferences;
   renderExamples(mem.examples);
+  renderVoices(await api("/api/voices").catch(() => []));
   $("memory").showModal();
 }
 
@@ -490,6 +551,7 @@ form.addEventListener("submit", async (e) => {
     whisper_model: form.whisper_model.value,
     whisper_device: form.whisper_device.value,
     language: form.language.value.trim() || "auto",
+    speaker_labels: form.speaker_labels.checked,
     record_microphone: form.record_microphone.checked,
     record_system_audio: form.record_system_audio.checked,
   }).catch((err) => showError(err.message));

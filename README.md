@@ -13,6 +13,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 
 - **Records your mic and your computer's audio together** (Windows), so in-person meetings and Teams/Zoom/Meet calls both work. The transcript fills in live, about every 30 seconds.
 - **Transcribes locally** with [Whisper](https://github.com/SYSTRAN/faster-whisper). Audio never leaves your computer. An NVIDIA GPU makes it much faster but isn't required.
+- **Knows who's talking:** lines are labeled by voice ("Speaker 2:"). Name a voice once ("Speaker 2" → "Avanish") and it's recognized by name in later meetings, so notes can say who committed to what.
 - **You choose what to get out of it:** type any request, or click a preset (meeting notes, update for someone absent, action items, decisions, Discord, email). Follow-ups work like a chat ("shorter", "add that we still need the resin order").
 - **Ask mid-meeting.** New transcript text is sent automatically with each request.
 - **Off the record:** say so in the meeting and that part is left out of the notes.
@@ -22,7 +23,7 @@ It runs as a small app in your browser. Nothing is hosted online.
 
 ## Requirements
 
-- **Windows 10/11.** Mac and Linux work too, but record the microphone only (no system audio); you can still upload a recording of the call.
+- **Windows 10/11.** Mac and Linux should work too (not tested yet), but record the microphone only (no system audio); you can still upload a recording of the call.
 - **Python 3.10 or newer** from [python.org](https://www.python.org/downloads/). During install, tick **"Add python.exe to PATH"**.
 - About 2 GB of free disk space (more with GPU support).
 - A summarizer, one of:
@@ -51,6 +52,17 @@ The first transcription downloads the Whisper model (about 0.5 GB on CPU, 1.6 GB
 
 **Without an API key:** type your request (or click a preset), then click **Copy for AI**. It copies the instructions, context, transcript and request as one message: paste it (Ctrl+V) into a new chat in Claude.ai, ChatGPT or any AI. The button then becomes **Copy follow-up**: click a preset or type a request and it copies just that (plus any transcript recorded since) to paste into the same chat. **New AI chat** copies everything again for a fresh chat; **Reset chat** also starts over.
 
+## Who said what (speaker labels)
+
+Each transcript line gets a voice label. A small voice model (25 MB, downloaded on first use) turns each line's audio into a voiceprint, and lines with similar voiceprints get the same label. Everything runs on your computer, and transcription gets a few seconds slower per minute of audio.
+
+- **Name each voice once.** Above the transcript, click a dashed **Speaker N** chip (hover it to see an example line) and type who it is. Their lines are relabeled, and their voice is saved so they're labeled by name in future meetings.
+- **One person split in two?** Give both the same name and they merge.
+- Labels are refined as the meeting goes on (every ~20 lines) and once more when transcription finishes, so a line's label can change.
+- **What to expect:** on a 57-minute room meeting with ~7 people it found 7 voices and kept each person's lines together, and a named person was recognized in a separate recording. Lines under 1.5 seconds ("Yeah.") aren't labeled, and lines where two people talk get one label. Recordings with poor audio (far from the mic, or heavy noise) split into more, smaller speakers; merge them by naming.
+- **Saved voices** are listed in **Memory**, with **Forget** to delete one. They're stored in `voices.json` next to the app, on your computer only. Voiceprints are biometric data: tell people you're doing this, just as you'd get consent to record.
+- Turn it off in **Settings** (Transcription section).
+
 ## Teaching it (Memory)
 
 The app gets better the more you use it:
@@ -59,7 +71,7 @@ The app gets better the more you use it:
 - **Remember:** click it under a request you'll always want ("no emojis", "keep updates short"). It's added to your standing preferences.
 - **Save as example:** click it on a response you liked. Future responses to similar requests copy its structure and tone. The newest 4 examples are used.
 
-Memory is stored in `memory.json` next to the app. Changes apply from the next new chat (**New meeting** or **Reset chat**).
+Memory is stored in `memory.json` next to the app. Ollama and Copy for AI use it right away; a Claude API chat picks up changes from the next new chat (**New meeting** or **Reset chat**).
 
 ## What to expect from Ollama
 
@@ -68,7 +80,7 @@ Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop
 - **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
 - **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, answers start within about 4 seconds and full notes finish in about 2 minutes (you can read as they stream). That's because the app has Ollama read the transcript in the background as soon as a recording or upload finishes, or when you open a past meeting (about 40 seconds; the status line says so). Ask during that time and the answer just waits for it. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
 - **`qwen3.5:4b` is faster but not recommended for notes.** On the same meeting it made up owners, due dates, and decisions nobody made. gemma4:12b stuck to what was said.
-- Before an Ollama request, the app unloads Whisper from the GPU to make room (it reloads on the next transcription). Ollama frees the model's memory 2 minutes after the last request.
+- Whisper and Ollama take turns on the GPU: before an Ollama request the app unloads Whisper, and before transcribing it tells Ollama to unload (on an 8 GB card, both at once made transcription crawl). Otherwise Ollama keeps the model loaded for 10 minutes after an answer so follow-ups are fast, and 15 minutes after reading a new transcript. With Ollama as your summarizer, asking mid-meeting works but each answer pauses live transcription while it runs; Copy for AI doesn't.
 
 To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and compare its output with `eval/answer_key.md`.
 
@@ -96,6 +108,7 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 | "Python 3.10 or newer is required" | Install Python from python.org with "Add python.exe to PATH" ticked, then run `run.bat` again. |
 | Setup failed partway | Check your internet connection and run `run.bat` again. If it keeps failing, delete the `.venv` folder and retry. |
 | Transcription is slow | On CPU, pick a smaller Whisper model in Settings (`base` or `tiny`). With an NVIDIA GPU, make sure Settings > Device shows CUDA (re-run setup by deleting `.venv`). |
+| The live transcript falls behind | The status line says how far behind and which device Whisper is on. Nothing is lost: the audio is saved and it catches up (faster decoding kicks in automatically). If it says "GPU unavailable" (common right after the laptop wakes from sleep), it retries the GPU every 2 minutes. `logs/meetingnotes.log` records timing per chunk. |
 | Ollama says it can't connect | Start Ollama, then download a model from Settings (or run `ollama pull gemma4:12b`) and pick it. |
 | Ollama is very slow | The model is too big for your GPU. A smaller one like `qwen3.5:4b` is faster but less accurate; for long meetings, Copy for AI is faster and better. |
 | Names and terms come out wrong | Put them in Meeting context. |
@@ -109,7 +122,8 @@ Use **New meeting** for the next one and **Past meetings** to reopen old ones. T
 |---|---|
 | `app.py` | Flask server: meeting state, background transcription queue, API routes |
 | `recorder.py` | Captures mic (sounddevice) and system audio (WASAPI loopback via PyAudioWPatch), mixes to 16 kHz mono, writes the WAV, and cuts ~30 s chunks at quiet points |
-| `transcriber.py` | faster-whisper; tries the GPU, then falls back to CPU |
+| `transcriber.py` | faster-whisper; tries the GPU, falls back to CPU, and retries the GPU later; hallucination filters |
+| `speakers.py` | Speaker labels: voiceprints (sherpa-onnx + WeSpeaker), grouping, remembered voices |
 | `summarizer.py` | The system prompt, Claude (Anthropic SDK, streaming) and Ollama calls (two-pass for long transcripts), model recommendation |
 | `memory.py` | Glossary, preferences, and saved examples (`memory.json`) and how they're added to the prompt |
 | `eval/` | A fictional test meeting, its answer key, and a script to check Ollama models against it |

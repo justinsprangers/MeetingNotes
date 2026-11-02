@@ -1,38 +1,29 @@
 # Meeting Notes: session notes
 
 ## Status
-- Record (mic + Windows system audio), upload, or paste → live local Whisper transcript → chat-style requests with presets. Summarize with the Claude API, Ollama, or **Copy for Claude.ai** (the user's main no-cost path; the API is billed separately from a subscription). Meetings are saved and reopenable.
-- Memory: glossary, preferences ("Remember" on requests), saved examples ("Save as example" on responses).
-- Ollama: thinking off, context sized to input, single pass up to ~80 min of transcript (`SINGLE_PASS_CHARS` 80k), two-pass beyond; pre-warmed after transcription.
-- Copy for AI (was "Copy for Claude.ai"): first copy = everything; then "Copy follow-up" copies just the request + new transcript (`copied_transcript` on the meeting); "New AI chat" / Reset chat start over. No longer auto-opens claude.ai. Recommended model (gemma4:12b or qwen3.5:4b, by hardware) with a Download button.
-- Verified: file transcription (CPU and GPU), recorder pipeline (simulated input), settings, past meetings, error paths, Copy for Claude.ai, memory, two-pass flow/caching (mock), and real gemma4:12b output on the eval meeting.
-- First real use (57-min in-person meeting): Whisper looped one word for ~20 min; fixed with a loop guard and re-transcribed (recovered all of it). Speaker misattribution: prompt now forbids guessing; Me/Others labels on calls. Whisper also invented "Name.:" labels from the glossary prompt (fixed). Whole meeting re-transcribed clean (backup `*.before-loop-fix.*` in its folder).
-- Model comparison on that meeting (cleaned): gemma4:12b 453 s first answer / 23 s follow-up, grounded (one owner misattributed). qwen3.5:4b 93 s / 5 s, fits fully on GPU, but invented owners, due dates, and decisions. gemma stays recommended on 8 GB.
-- **Not verified:** real Claude API replies (no key), live system-audio capture (speakers were muted) and so the Me/Others labels outside simulation, Mac/Linux.
+- Record (mic + Windows system audio), upload, or paste → live local Whisper transcript with voice speaker labels → chat-style requests with multi-select presets. Summarize with the Claude API, Ollama (gemma4:12b), or **Copy for AI** (the user's main no-cost path; first copy = everything, then "Copy follow-up" = request + new transcript). Meetings are saved and reopenable.
+- Memory: glossary, preferences, saved examples, remembered voices.
+- Ollama: thinking off, single pass up to 80k chars (~80 min, untested near the top), two-pass beyond; pre-warmed after transcription (first text ~4 s on a 57-min meeting, full notes ~2 min); keep_alive 10 min; unloaded whenever Whisper needs the GPU.
+- Speaker labels (2026-11-01): 10/25 meeting → 7 voices, Sebastian's lines consistent; a named voice was recognized in a separate recording; the 11/01 recording (poor audio) splits into many small speakers. Live path: 10 min of chunks in 100 s with labels.
+- Live-transcript stall (11/01, 83 min, finished 26 min after stop): GPU replay runs 25x real time, so Whisper was on CPU or starved of GPU. Fixed causes: Ollama holding the GPU (reproduced), sticky CPU fallback (GPU retry), and the transcript box freezing while focused (review finding). Now shows "N behind" and logs per-chunk timing to `logs/meetingnotes.log`.
+- **Not verified:** real Claude API replies (no key), a real live recording since the stall fixes, live system-audio capture, Mac/Linux, `int8_float16` accuracy vs float16 (expected negligible).
 
-## Eval results (2026-10-25, eval/transcript.txt, 7.5-min fictional meeting)
-- Claude baseline (written in-session by Opus 5.5 with the same prompt): everything in the answer key.
-- gemma4:12b, no thinking, single pass: all 7 action items with owners/dates, all 4 approvals, glossary spellings right, off-the-record excluded. Missed "execution first" in the notes, one open question; one stray preamble line in the update. 86 s notes, 46 s update on the laptop 4060.
-- Two-pass on the same meeting: slightly more complete (all 3 open questions), 192 s first answer, 38 s follow-up.
-- Thinking on was ~3× slower with no quality gain.
+## Eval results (2026-10-25)
+- 7.5-min fictional meeting (`eval/`): gemma4:12b single pass got all 7 action items and 4 approvals; thinking on was ~3× slower with no gain.
+- 57-min real meeting: gemma4:12b grounded (one owner misattributed); qwen3.5:4b ~5× faster but invented owners, dates and decisions, so gemma stays recommended on 8 GB.
 
 ## Next steps
-- Single pass with gemma on the 57-min meeting: 69 s (actions) / 112 s (notes), better than two-pass (453 s). Untested near 90 min / 32K context.
-- Pre-warm verified on the 57-min meeting (test copy): 38 s in the background, then first text at 3.9 s (notes done 115 s), follow-up first text 4.5 s; also triggers after upload. Not tested with a live recording stop.
-- Record a real call to check Me/Others labels.
-- Push to a public GitHub repo.
-- After the user's testing: Windows installer (bundled Python, Start menu shortcut, GitHub Releases), reusing LaserEngraver's build setup. Keep run.bat. The user said to wait until they've tested it.
-- Ideas: real speaker diarization (pyannote; heavy, needs HF token), export notes to .docx.
+- User: restart run.bat (it installs sherpa-onnx automatically), record a real meeting, name the speakers, and check the "behind" status and `logs/meetingnotes.log` if it lags.
+- From the 2026-11-01 review (not done yet): Stop button + "reading transcript" status for un-prewarmed Ollama asks; measure real token count via `prompt_eval_count` before trusting 80k-char single pass; try `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` (user's Ollama env, ask first); pre-warm on Send-box focus instead of on every meeting open; one-click Copy for AI after Stop; send transcript only when it changes instead of every poll.
+- Push to a public GitHub repo. Windows installer after the user's testing (reuse LaserEngraver's build setup).
 
 ## Decisions & gotchas
-- See `CLAUDE.md` for the append-only history rule, memory snapshot, two-pass design, recorder design, and GPU DLL handling.
-- Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo on CUDA, small on CPU.
+- See `CLAUDE.md` for append-only history, memory snapshot, two-pass, pre-warm, speaker labels, GPU sharing, recorder design, GPU DLLs.
+- Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo (int8_float16) on CUDA, small on CPU.
 
 ## Log
-- 2026-11-01: presets multi-select into one request ("- " lines + combine heading, editable); Discord/email presets reworded to work combined
-- 2026-10-25: Copy for AI + follow-up copies; Ollama single pass up to ~90 min (7.5 min → ~1.5 min on a 57-min meeting)
-- 2026-10-25: Whisper loop guard + filler filter, glossary-as-terms for Whisper, no-guess speaker rule + Me/Others labels, unload Whisper before Ollama, keep_alive 2m; qwen3.5:4b vs gemma4:12b compared (gemma kept)
-- 2026-10-25: Ollama installed; gemma4:12b eval; thinking off, glossary in extraction, single-pass up to ~15 min; eval/ folder
-- 2026-10-24: Memory, Ollama two-pass summarizing, model recommendation + download
-- 2026-10-24: Copy for Claude.ai button (uses the subscription, no API cost)
-- 2026-10-24: v1 built and tested; own git repo (MIT)
+- 2026-11-01: speaker labels by voice (sherpa-onnx, centered voiceprints, regroup, naming, remembered voices); stall fixes (Ollama unloads for Whisper, GPU retry, catch-up decoding, lag status, log file, focus freeze, worker crash guard, stop race); copy confirm; keep_alive 10 min; run.bat installs new requirements; review session (Sonnet) findings folded in
+- 2026-11-01: presets multi-select into one request
+- 2026-10-25: Copy for AI + follow-ups; Ollama single pass + pre-warm
+- 2026-10-25: Whisper loop guard + filler filter, glossary-as-terms for Whisper, no-guess speaker rule, model comparison
+- 2026-10-24: Memory, Ollama two-pass, model recommendation; Copy for Claude.ai; v1 built (MIT)

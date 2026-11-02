@@ -27,7 +27,7 @@ def _add_cuda_dlls():
 
 
 _add_cuda_dlls()
-from faster_whisper import WhisperModel  # noqa: E402  (must come after the DLL setup)
+from faster_whisper import WhisperModel, decode_audio  # noqa: E402,F401  (must come after the DLL setup)
 
 DEFAULT_MODEL = {"cuda": "large-v3-turbo", "cpu": "small"}
 
@@ -87,7 +87,8 @@ class Transcriber:
                 return
             self.info = f"loading {name} on {dev.upper()} (the first time, this downloads it and can take several minutes)"
             try:
-                model = WhisperModel(name, device=dev, compute_type="float16" if dev == "cuda" else "int8",
+                # int8_float16 on the GPU: about 1 GB less memory than float16, leaving room for Ollama.
+                model = WhisperModel(name, device=dev, compute_type="int8_float16" if dev == "cuda" else "int8",
                                      cpu_threads=CPU_THREADS)
                 # A short warm-up surfaces missing CUDA libraries now instead of mid-meeting.
                 list(model.transcribe(np.zeros(16000, np.float32))[0])

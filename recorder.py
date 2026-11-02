@@ -66,7 +66,8 @@ def _quiet_split(audio: np.ndarray) -> int:
     tail = audio[start:]
     if len(tail) <= win:
         return len(audio)
-    energy = np.convolve(tail ** 2, np.ones(win), "valid")
+    sq = np.concatenate([[0.0], np.cumsum(tail.astype(np.float64) ** 2)])
+    energy = sq[win:] - sq[:-win]  # sliding-window energy; np.convolve here cost ~0.3 s of CPU per chunk
     return start + int(np.argmin(energy)) + win // 2
 
 

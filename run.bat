@@ -29,5 +29,12 @@ if not exist ".venv\setup-done" (
     )
     echo done> ".venv\setup-done"
 )
+rem After an update adds packages to requirements.txt, install them (quick when nothing changed).
+fc /b requirements.txt ".venv\requirements.installed" >nul 2>&1
+if errorlevel 1 (
+    echo Installing new packages Meeting Notes needs...
+    ".venv\Scripts\python" -m pip install -q -r requirements.txt
+    if not errorlevel 1 copy /y requirements.txt ".venv\requirements.installed" >nul
+)
 ".venv\Scripts\python" app.py
 pause

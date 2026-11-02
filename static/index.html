@@ -33,6 +33,7 @@
     <textarea id="context" rows="3" placeholder="e.g. Lab supervisors meeting. Josh is our manager and wasn't here. IPA = isopropyl alcohol for the Formlabs wash."></textarea>
 
     <label for="transcript">Transcript <span class="hint">(record, upload, or paste one here)</span></label>
+    <div id="speakers" class="speakers" hidden></div>
     <textarea id="transcript" class="transcript" placeholder="The transcript appears here as you record. You can also paste one in."></textarea>
   </section>
 
@@ -110,6 +111,7 @@
         </select>
       </label>
       <label>Language <input name="language" placeholder="auto, or a code like en"></label>
+      <label><input type="checkbox" name="speaker_labels"> Label who's speaking, by voice (name each voice once; it's remembered)</label>
       <p class="hint">Currently: <span id="whisper-info"></span></p>
     </fieldset>
 
@@ -130,6 +132,8 @@
     <textarea id="preferences" rows="4" placeholder="- No emojis&#10;- Keep updates for Josh short"></textarea>
     <label>Saved examples <span class="hint">(responses you liked: "Save as example" on a response. The newest 4 are used.)</span></label>
     <div id="examples" class="examples"></div>
+    <label>Remembered voices <span class="hint">(people you've named; their lines get labeled automatically. Stored only on this computer.)</span></label>
+    <div id="voices" class="examples"></div>
     <div class="dialog-actions">
       <button value="cancel" formnovalidate>Cancel</button>
       <button value="save" class="primary">Save</button>

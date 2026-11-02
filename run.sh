@@ -9,4 +9,9 @@ if [ ! -f .venv/setup-done ]; then
     .venv/bin/python -m pip install -r requirements.txt
     touch .venv/setup-done
 fi
+# After an update adds packages to requirements.txt, install them (quick when nothing changed).
+if ! cmp -s requirements.txt .venv/requirements.installed; then
+    echo "Installing new packages Meeting Notes needs..."
+    .venv/bin/python -m pip install -q -r requirements.txt && cp requirements.txt .venv/requirements.installed
+fi
 exec .venv/bin/python app.py

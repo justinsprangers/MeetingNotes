@@ -16,6 +16,7 @@ DEFAULTS = {
     "whisper_model": "auto",              # auto, tiny, base, small, medium, large-v3-turbo, large-v3
     "whisper_device": "auto",             # auto, cpu, cuda
     "language": "auto",                   # "auto" or a code like "en"
+    "speaker_labels": True,               # label lines by voice (speakers.py)
     "record_microphone": True,
     "record_system_audio": True,          # Windows only: captures what plays through your speakers
 }

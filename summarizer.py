@@ -14,7 +14,8 @@ SYSTEM_PROMPT = """You turn meeting transcripts into whatever the user asks for:
 
 About the transcript:
 - It comes from automatic speech recognition, so expect misheard words, missing punctuation, and no speaker names. Use context to work out what was meant.
-- Never guess who said something. Name a person only when the transcript shows it: they say their own name, someone addresses them by name right before they answer, or someone says "Name will…". Otherwise write it without a name (for example "Someone suggested…"), and mark owners you can't tell as "[owner unclear]". Only if lines start with "Me:" or "Others:": "Me" is the person who recorded the meeting (their name may be in the glossary) and "Others" is someone else on the call. Never write "Me" as a name or owner in your output. When an unclear word or name matters, flag it briefly (for example "[unclear: probably IPA]") instead of guessing silently.
+- Lines may start with a speaker label recognized by voice: a name ("Avanish: ") or "Speaker 2: " for a voice nobody has named yet. Labels are usually right but can be wrong for short or overlapping lines; lines without a label are unknown. Use a name label to attribute what that person said and committed to. Don't turn "Speaker N" into a name unless the transcript makes it clear who it is; say "Speaker 2" instead. "Me:" means the person who recorded the meeting and "Others:" someone else on the call; never write "Me" as a name.
+- Never guess who said something beyond that. Without a label, name a person only when the transcript shows it: they say their own name, someone addresses them by name right before they answer, or someone says "Name will…". Otherwise write it without a name (for example "Someone suggested…"), and mark owners you can't tell as "[owner unclear]". When an unclear word or name matters, flag it briefly (for example "[unclear: probably IPA]") instead of guessing silently.
 - Lines start with [minutes:seconds] timestamps from the start of the recording.
 - It may arrive in parts while the meeting is still going. Treat later parts as a continuation of the same meeting, and update earlier output when asked.
 - Side conversations, small talk, and personal remarks are usually not meeting content. Leave them out unless the user asks for them.
@@ -39,7 +40,10 @@ CLAUDE_EFFORT = "medium"
 SINGLE_PASS_CHARS = 80000   # about 23,000 tokens (~80 min); with ANSWER_TOKENS it fits MAX_CONTEXT
 SECTION_CHARS = 12000       # about 3,000 tokens, roughly 10-15 minutes
 MAX_CONTEXT = 32768         # Ollama's default context is small enough to silently cut off input
-KEEP_ALIVE = "2m"           # long enough for a follow-up question, short enough to give the RAM back
+# After an answer, keep the model (and its read of the transcript) loaded this long so a
+# follow-up after reading the notes starts in seconds; at 2 min it often had to reload (~40 s).
+# Transcription unloads it right away when it needs the GPU (ollama_free_gpu).
+KEEP_ALIVE = "10m"
 PREWARM_KEEP_ALIVE = "15m"  # after a pre-warm, wait longer for the first question
 ANSWER_TOKENS = 8192        # context room for the request, follow-ups and answers
 EXTRACT_PROMPT = """Below is section {i} of {n} of a meeting transcript. It comes from speech recognition, so expect misheard words; use the glossary and context to correct names and terms.
@@ -51,7 +55,7 @@ Write compact notes of everything in this section that could matter later:
 - Open questions, and anything that needs someone's approval
 - If something is said to be off the record, write only "[off-the-record part omitted]" for it
 
-The transcript has no speaker names. Name a person only when the text itself shows who spoke (they say their name, are addressed by name, or are named as the owner); never guess from the glossary. Only if lines start with "Me:" or "Others:": "Me" is the person who recorded and "Others" is someone else on the call. Never write "Me" as a name.
+Lines may start with a speaker label recognized by voice (a name, or "Speaker 2" for an unnamed voice; "Me"/"Others" = recorder / someone on the call). Keep the label with each note, e.g. "[12:30] Avanish: will book the room". For unlabeled lines, name a person only when the text itself shows who spoke; never guess from the glossary, and never write "Me" as a name.
 
 Skip small talk and side conversations. Use short bullet points and keep the [mm:ss] timestamp at the start of each item. Don't add anything that isn't in the transcript.
 {context}
@@ -297,6 +301,19 @@ def _ollama_stream(settings, messages, num_ctx=None):
             yield text
         if data.get("done"):
             break
+
+
+def ollama_free_gpu(settings):
+    """Unload any model Ollama has loaded. Whisper needs the GPU: with gemma4:12b holding
+    ~7 GB of an 8 GB card, transcription slowed to a crawl and live transcripts fell behind."""
+    base = settings["ollama_url"].rstrip("/")
+    try:
+        loaded = requests.get(base + "/api/ps", timeout=2).json().get("models", [])
+        for m in loaded:
+            requests.post(base + "/api/generate", json={"model": m["name"], "keep_alive": 0}, timeout=10)
+        return [m["name"] for m in loaded]
+    except (requests.RequestException, ValueError):
+        return []  # Ollama not running: nothing to free
 
 
 def ollama_models(settings):
