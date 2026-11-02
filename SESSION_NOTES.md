@@ -6,7 +6,9 @@
 - Ollama: thinking off, single pass up to 80k chars (~80 min, untested near the top), two-pass beyond; pre-warmed after transcription (first text ~4 s on a 57-min meeting, full notes ~2 min); keep_alive 10 min; unloaded whenever Whisper needs the GPU.
 - Speaker labels (2026-11-01): 10/25 meeting → 7 voices, Sebastian's lines consistent; a named voice was recognized in a separate recording; the 11/01 recording (poor audio) splits into many small speakers. Live path: 10 min of chunks in 100 s with labels.
 - Live-transcript stall (11/01, 83 min, finished 26 min after stop): GPU replay runs 25x real time, so Whisper was on CPU or starved of GPU. Fixed causes: Ollama holding the GPU (reproduced), sticky CPU fallback (GPU retry), and the transcript box freezing while focused (review finding). Now shows "N behind" and logs per-chunk timing to `logs/meetingnotes.log`.
-- **Not verified:** real Claude API replies (no key), a real live recording since the stall fixes, live system-audio capture, Mac/Linux, `int8_float16` accuracy vs float16 (expected negligible).
+- **Not verified:** real Claude API replies (no key), a real live recording since the stall fixes, live system-audio capture, Mac/Linux.
+- Checked 2026-11-02: `transcriber.unload()` frees VRAM (1189 → 101 MiB). `int8_float16` vs float16 on 5 min of 10/25: 17% faster, 93% word agreement, differences only on unclear audio (neither better), kept.
+- Ollama `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` tried 2026-11-02 on the 57-min meeting: 36 vs 34 layers on GPU but no speed gain (163 vs 152 s; 8.1 vs 8.7 tok/s). gemma4's KV cache is already small (~0.9 GB); the weights are the bottleneck. Reverted; don't retry. Note: env vars set from a shell only reach Ollama if it's started from a shell that has them.
 
 ## Eval results (2026-10-25)
 - 7.5-min fictional meeting (`eval/`): gemma4:12b single pass got all 7 action items and 4 approvals; thinking on was ~3× slower with no gain.
@@ -14,7 +16,6 @@
 
 ## Next steps
 - User: restart run.bat (it installs sherpa-onnx automatically), record a real meeting, name the speakers, and check the "behind" status and `logs/meetingnotes.log` if it lags.
-- Review leftovers: try `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` (changes the user's Ollama setup: ask first; may fit more layers on the GPU); verify VRAM is really freed after `transcriber.unload()`.
 - Push to a public GitHub repo. Windows installer after the user's testing (reuse LaserEngraver's build setup).
 
 ## Decisions & gotchas
@@ -22,6 +23,7 @@
 - Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo (int8_float16) on CUDA, small on CPU.
 
 ## Log
+- 2026-11-02: verified Whisper unload frees VRAM and int8_float16 accuracy; Ollama flash attention + q8 KV benchmarked, no gain, reverted
 - 2026-11-01: Stop button, "reading" status, real token count sizing (78k chars = 22.9k tokens fits), pre-warm on request-box focus (once per transcript), one-click notes after transcription, polling sends transcript only on change (54 KB → 0.7 KB/s), transcript type validation
 - 2026-11-01: speaker labels by voice (sherpa-onnx, centered voiceprints, regroup, naming, remembered voices); stall fixes (Ollama unloads for Whisper, GPU retry, catch-up decoding, lag status, log file, focus freeze, worker crash guard, stop race); copy confirm; keep_alive 10 min; run.bat installs new requirements; review session (Sonnet) findings folded in
 - 2026-11-01: presets multi-select into one request
