@@ -48,7 +48,9 @@ The first transcription downloads the Whisper model (about 0.5 GB on CPU, 1.6 GB
 1. **Start a transcript.** Click **Record** before the meeting starts, or **Upload audio** (most audio and video files work), or paste a transcript (for example from Teams or Zoom) into the Transcript box.
 2. **Add context** (optional but worth it): who's there, their roles, project names, and jargon. Whisper uses it to spell names right, and the summarizer uses it to fix misheard words.
 3. **Ask** for what you want, or click presets. Click several to combine them into one request (click again to remove one) and type extra instructions below them. You can ask while still recording.
-4. **Refine** with follow-ups. **Copy** on a response copies just the message when the response is a single code block (the Discord and email presets).
+4. **Refine** with follow-ups. **Copy** on a response copies just the message when the response is a single code block (the Discord and email presets). **Stop** (the Send button while an answer is coming) cancels it.
+
+When a recording or upload finishes transcribing, **Meeting notes** is selected for you and **Copy for AI** is highlighted, so getting notes is one click.
 
 **Without an API key:** type your request (or click a preset), then click **Copy for AI**. It copies the instructions, context, transcript and request as one message: paste it (Ctrl+V) into a new chat in Claude.ai, ChatGPT or any AI. The button then becomes **Copy follow-up**: click a preset or type a request and it copies just that (plus any transcript recorded since) to paste into the same chat. **New AI chat** copies everything again for a fresh chat; **Reset chat** also starts over.
 
@@ -78,7 +80,7 @@ Memory is stored in `memory.json` next to the app. Ollama and Copy for AI use it
 Tested on a fictional 7.5-minute meeting (`eval/`) with `gemma4:12b` on a laptop RTX 4060 (8 GB):
 
 - **Quality:** close to Claude. It got every action item, owner, due date, and approval item, used the glossary spellings, and left out the off-the-record remark and small talk. It missed a few softer points that Claude caught (the "execution first" theme in the notes, one parked question) and sometimes misfiled a detail (a tip listed as a decision).
-- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, answers start within about 4 seconds and full notes finish in about 2 minutes (you can read as they stream). That's because the app has Ollama read the transcript in the background as soon as a recording or upload finishes, or when you open a past meeting (about 40 seconds; the status line says so). Ask during that time and the answer just waits for it. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
+- **Speed:** about 45–90 seconds per answer on that short meeting. On a real 57-minute meeting, answers start within about 4 seconds and full notes finish in about 2 minutes (you can read as they stream). That's because the app has Ollama read the transcript in the background as soon as a recording or upload finishes, or when you click into the request box on a past or pasted meeting (about 20–40 seconds; the status line says so). Ask during that time and the answer just waits for it. The 7.7 GB model doesn't fit in an 8 GB GPU, so part of it runs on the CPU from system RAM.
 - **`qwen3.5:4b` is faster but not recommended for notes.** On the same meeting it made up owners, due dates, and decisions nobody made. gemma4:12b stuck to what was said.
 - Whisper and Ollama take turns on the GPU: before an Ollama request the app unloads Whisper, and before transcribing it tells Ollama to unload (on an 8 GB card, both at once made transcription crawl). Otherwise Ollama keeps the model loaded for 10 minutes after an answer so follow-ups are fast, and 15 minutes after reading a new transcript. With Ollama as your summarizer, asking mid-meeting works but each answer pauses live transcription while it runs; Copy for AI doesn't.
 
@@ -86,7 +88,7 @@ To check another model, run `.venv\Scripts\python eval\run_eval.py <model>` and 
 
 ## How Ollama handles long meetings
 
-Meetings up to about 80 minutes are read in one pass (on the 57-minute test meeting this was faster and more complete than two passes). Longer transcripts don't fit the model's memory, so the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
+Meetings up to about 80 minutes (~23,000 tokens, measured) are read in one pass (on the 57-minute test meeting this was faster and more complete than two passes). The app checks Ollama's real token count when it reads a transcript and enlarges the model's memory if needed, so the start of a long meeting isn't silently cut off. Longer transcripts don't fit, so the app works in two passes. First it reads the transcript in sections and pulls out the facts (topics, decisions, action items, open questions). Then it answers your request from those notes. You'll see "Reading the transcript: section 2 of 6…" the first time. Section notes are saved with the meeting, so follow-ups are fast, and only new sections are read as the meeting continues.
 
 Use **New meeting** for the next one and **Past meetings** to reopen old ones. The `?` button in the app has a short version of these steps.
 

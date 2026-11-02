@@ -50,11 +50,25 @@ function setField(el, value) {
   if (document.activeElement !== el && !saveTimer && el.value !== value) el.value = value;
 }
 
+// The server sends the transcript and speaker list only when they changed (see /api/state).
+let transcriptKey = "";
+let transcriptText = "";
+let speakersList = [];
+let wasBusy = false;
+let finishedHint = false;
+
 function render(s) {
+  if (s.transcript !== undefined) {
+    transcriptKey = s.transcript_key;
+    transcriptText = s.transcript;
+    speakersList = s.speakers;
+  }
+  s.transcript = transcriptText;
   lastState = s;
   if (s.id !== meetingId) {
     meetingId = s.id;
     historyLength = -1;
+    finishedHint = false;
     $("title").value = s.title;
     $("context").value = s.context;
     $("transcript").value = s.transcript;
@@ -75,6 +89,14 @@ function render(s) {
   } else if (document.activeElement !== t) {
     setField(t, s.transcript);
   }
+  // A recording or upload just finished: set up "Meeting notes" so it's one click to
+  // Send, or to Copy for AI and paste the whole meeting into an AI chat.
+  if (wasBusy && !busy && s.transcript.trim() && !s.error) {
+    if (!$("ask").value.trim()) togglePreset(PRESETS[0][1]);
+    finishedHint = true;
+    $("copy-ai").classList.add("highlight");
+  }
+  wasBusy = busy;
 
   const rec = $("record");
   rec.textContent = s.recording ? `■ Stop (${formatTime(s.record_seconds)})` : "● Record";
@@ -90,6 +112,7 @@ function render(s) {
   } else if (s.recording) status = "Recording. The transcript fills in about every 30 seconds.";
   else if (s.pending > 0) status = `Transcribing… (${s.pending} part${s.pending > 1 ? "s" : ""} queued; Whisper: ${s.whisper})`;
   else if (s.prewarm === "reading") status = "Ollama is reading the transcript so answers start fast (you can ask now; it'll wait for this).";
+  else if (finishedHint) status = "Transcript done. \"Meeting notes\" is set up: click Send, or Copy for AI and paste into your AI chat.";
   if (silentPolls > 20) status += " No system audio so far. Windows records silence when the volume is muted or at 0.";
   $("status").textContent = status;
 
@@ -97,7 +120,7 @@ function render(s) {
     `<span>${name}<span class="meter"><span style="width:${Math.min(100, level * 400)}%"></span></span></span>`).join("");
   showError(s.error);
   renderCopyButtons(s.copied);
-  renderSpeakers(s.speakers, s.voice_error);
+  renderSpeakers(speakersList, s.voice_error);
 
   if (!streaming && s.history.length !== historyLength) {
     historyLength = s.history.length;
@@ -218,7 +241,7 @@ async function renderVoices(names) {
 
 async function poll() {
   try {
-    render(await api("/api/state"));
+    render(await api(`/api/state?t=${encodeURIComponent(transcriptKey)}`));
   } catch (e) {
     $("status").textContent = "Can't reach the app. Is the Meeting Notes window still open?";
   }
@@ -281,11 +304,15 @@ $("file").addEventListener("change", async () => {
 
 // ---- Asking -------------------------------------------------------------
 
+let stopper = null;  // AbortController for the answer being streamed
+
 async function ask(text) {
   if (streaming || !text.trim()) return;
   await saveNow();
   streaming = true;
-  $("send").disabled = true;
+  clearFinishedHint();
+  stopper = new AbortController();
+  $("send").textContent = "Stop";
   addMessage("user", text);
   const out = addMessage("assistant", "…");
   const chat = $("chat");
@@ -295,6 +322,7 @@ async function ask(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request: text }),
+      signal: stopper.signal,
     });
     if (!res.ok) {
       out.textContent = `[${(await res.json()).error}]`;
@@ -314,14 +342,32 @@ async function ask(text) {
       }
     }
   } catch (e) {
-    out.textContent += `\n\n[Connection lost: ${e.message}]`;
+    // Stopped answers aren't saved, so the next request covers the same ground.
+    out.textContent += e.name === "AbortError" ? "\n\n[Stopped. Not saved to the chat.]"
+                                               : `\n\n[Connection lost: ${e.message}]`;
   } finally {
     // If the server saved this exchange, the history grows and the next poll redraws
     // the chat from it. If it failed, the error stays on screen.
     streaming = false;
-    $("send").disabled = false;
+    stopper = null;
+    $("send").textContent = "Send";
   }
 }
+
+function clearFinishedHint() {
+  finishedHint = false;
+  $("copy-ai").classList.remove("highlight");
+}
+
+// Clicking into the request box or picking a preset means a question is coming:
+// with Ollama, have it start reading the transcript now (the server skips repeats).
+let lastPrewarmAsk = 0;
+function prewarmSoon() {
+  if (!lastState || lastState.settings.provider !== "ollama" || Date.now() - lastPrewarmAsk < 30000) return;
+  lastPrewarmAsk = Date.now();
+  api("/api/prewarm", {}).catch(() => {});
+}
+$("ask").addEventListener("focus", prewarmSoon);
 
 // Progress notes arrive inside the stream as \x01note\x02 (e.g. "Reading section 2 of 5").
 // Show the latest one until the answer itself starts.
@@ -341,7 +387,8 @@ function showStreamed(out, raw) {
 
 $("ask-form").addEventListener("submit", (e) => {
   e.preventDefault();
-  ask($("ask").value);
+  if (stopper) stopper.abort();  // the Send button reads "Stop" while an answer streams
+  else ask($("ask").value);
 });
 $("ask").addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -403,6 +450,7 @@ async function copyForAI(restart) {
     const { text } = await api("/api/copy-prompt", { request: $("ask").value, restart });
     await navigator.clipboard.writeText(text);  // throws if the page lost focus: then nothing counts as copied
     await api("/api/copy-prompt/confirm", {});
+    clearFinishedHint();
     $("ask").value = "";
     syncPresets();
     button.dataset.flashing = "1";

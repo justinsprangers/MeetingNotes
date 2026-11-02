@@ -14,7 +14,7 @@
 
 ## Next steps
 - User: restart run.bat (it installs sherpa-onnx automatically), record a real meeting, name the speakers, and check the "behind" status and `logs/meetingnotes.log` if it lags.
-- From the 2026-11-01 review (not done yet): Stop button + "reading transcript" status for un-prewarmed Ollama asks; measure real token count via `prompt_eval_count` before trusting 80k-char single pass; try `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` (user's Ollama env, ask first); pre-warm on Send-box focus instead of on every meeting open; one-click Copy for AI after Stop; send transcript only when it changes instead of every poll.
+- Review leftovers: try `OLLAMA_FLASH_ATTENTION=1` + `OLLAMA_KV_CACHE_TYPE=q8_0` (changes the user's Ollama setup: ask first; may fit more layers on the GPU); verify VRAM is really freed after `transcriber.unload()`.
 - Push to a public GitHub repo. Windows installer after the user's testing (reuse LaserEngraver's build setup).
 
 ## Decisions & gotchas
@@ -22,6 +22,7 @@
 - Default Claude model `claude-opus-5-5` at effort `medium`. Whisper auto: large-v3-turbo (int8_float16) on CUDA, small on CPU.
 
 ## Log
+- 2026-11-01: Stop button, "reading" status, real token count sizing (78k chars = 22.9k tokens fits), pre-warm on request-box focus (once per transcript), one-click notes after transcription, polling sends transcript only on change (54 KB → 0.7 KB/s), transcript type validation
 - 2026-11-01: speaker labels by voice (sherpa-onnx, centered voiceprints, regroup, naming, remembered voices); stall fixes (Ollama unloads for Whisper, GPU retry, catch-up decoding, lag status, log file, focus freeze, worker crash guard, stop race); copy confirm; keep_alive 10 min; run.bat installs new requirements; review session (Sonnet) findings folded in
 - 2026-11-01: presets multi-select into one request
 - 2026-10-25: Copy for AI + follow-ups; Ollama single pass + pre-warm

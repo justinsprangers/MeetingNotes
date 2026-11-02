@@ -2,6 +2,7 @@
 import ctypes
 import hashlib
 import json
+import logging
 import os
 import re
 import subprocess
@@ -9,6 +10,8 @@ import sys
 
 import anthropic
 import requests
+
+log = logging.getLogger("meetingnotes")
 
 SYSTEM_PROMPT = """You turn meeting transcripts into whatever the user asks for: notes, summaries, action items, updates for people who missed the meeting, lists, or messages formatted for a specific app.
 
@@ -46,6 +49,10 @@ MAX_CONTEXT = 32768         # Ollama's default context is small enough to silent
 KEEP_ALIVE = "10m"
 PREWARM_KEEP_ALIVE = "15m"  # after a pre-warm, wait longer for the first question
 ANSWER_TOKENS = 8192        # context room for the request, follow-ups and answers
+# Characters per token for sizing the context: gemma4 measured 3.60-3.66 on real meeting
+# transcripts (55k and 82k characters). Lowered (never raised) if a pre-warm counts more
+# tokens than expected, so the context only grows and a re-read is rare.
+_chars_per_token = 3.5
 EXTRACT_PROMPT = """Below is section {i} of {n} of a meeting transcript. It comes from speech recognition, so expect misheard words; use the glossary and context to correct names and terms.
 
 Write compact notes of everything in this section that could matter later:
@@ -192,8 +199,11 @@ def ollama_answer(settings, system, history, request_text, transcript, context, 
     if not transcript.strip():
         raise SummarizerError("There's no transcript yet. Record, upload audio, or paste a transcript first.")
 
-    if len(transcript) <= SINGLE_PASS_CHARS:
-        material = f"<transcript>\n{transcript.strip()}\n</transcript>"
+    whole = f"<transcript>\n{transcript.strip()}\n</transcript>"
+    if fits_single_pass(system, transcript, context):
+        material = whole
+        # Shown until text arrives: instant after a pre-warm, ~40 s for a long transcript without one.
+        yield ("status", "Ollama is reading the transcript (up to a minute the first time)…")
     else:
         sections = split_sections(transcript)
         notes, used = [], {}
@@ -232,12 +242,35 @@ def ollama_prewarm(settings, system, transcript, context):
     That only works if this sends the same system prompt, the same first message up to
     the end of the transcript, and the same num_ctx (a different one reloads the model).
     """
-    if not settings["ollama_model"] or not transcript.strip() or len(transcript) > SINGLE_PASS_CHARS:
-        return
+    global _chars_per_token
+    for _ in range(2):  # a second read only if the first showed the context was sized too small
+        if not settings["ollama_model"] or not fits_single_pass(system, transcript, context):
+            return
+        first = _first_message(context, f"<transcript>\n{transcript.strip()}\n</transcript>")
+        messages = [{"role": "system", "content": system}, {"role": "user", "content": first}]
+        num_ctx = _prefix_context(system, first)
+        data = _ollama_post(settings, {"messages": messages, "keep_alive": PREWARM_KEEP_ALIVE},
+                            stream=False, num_ctx=num_ctx, num_predict=1).json()
+        # Ollama's real token count corrects the characters-per-token guess. Names, numbers
+        # and timestamps make transcripts denser than the usual ~4; if the guess was too
+        # high, the context was too small and Ollama silently cut the start of the meeting.
+        tokens, chars = data.get("prompt_eval_count") or 0, len(system) + len(first)
+        if tokens >= num_ctx * 0.97:  # filled the context: it was cut, so the real ratio is lower
+            _chars_per_token = min(_chars_per_token, chars / tokens * 0.85)
+        elif tokens > chars / 6:  # a full read (a cached one counts only the new part)
+            _chars_per_token = min(_chars_per_token, chars / tokens)
+        else:
+            return
+        log.info("Ollama read %d tokens for %d characters (%.2f chars/token)", tokens, chars, chars / tokens)
+        if _prefix_context(system, first) <= num_ctx:
+            return  # it fit; read again only if the context has to grow
+
+
+def fits_single_pass(system, transcript, context):
+    """True if the whole transcript plus room for the answer fits the model's context."""
     first = _first_message(context, f"<transcript>\n{transcript.strip()}\n</transcript>")
-    messages = [{"role": "system", "content": system}, {"role": "user", "content": first}]
-    _ollama_post(settings, {"messages": messages, "keep_alive": PREWARM_KEEP_ALIVE},
-                 stream=False, num_ctx=_prefix_context(system, first), num_predict=1)
+    return (len(transcript) <= SINGLE_PASS_CHARS
+            and (len(system) + len(first)) / _chars_per_token + ANSWER_TOKENS <= MAX_CONTEXT)
 
 
 def _first_message(context, material):
@@ -249,14 +282,15 @@ def _round_context(tokens):
 
 
 def _context_size(messages):
-    # Big enough for the input plus a long answer (~3.5 characters per token), in 4K steps.
-    return _round_context(sum(len(m["content"]) for m in messages) / 3.5 + 4096)
+    # Big enough for the input plus a long answer, in 4K steps.
+    return _round_context(sum(len(m["content"]) for m in messages) / _chars_per_token + 4096)
 
 
 def _prefix_context(system, first, rest_chars=0):
     # Sized from the transcript alone, with fixed room for requests, follow-ups and the
     # answer, so it stays the same from the pre-warm through the first several requests.
-    return _round_context((len(system) + len(first)) / 3.5 + max(ANSWER_TOKENS, rest_chars / 3.5 + 4096))
+    return _round_context((len(system) + len(first)) / _chars_per_token
+                          + max(ANSWER_TOKENS, rest_chars / _chars_per_token + 4096))
 
 
 def _ollama_post(settings, body, stream, num_ctx=None, num_predict=None):
@@ -290,17 +324,22 @@ def _ollama_once(settings, messages):
 
 def _ollama_stream(settings, messages, num_ctx=None):
     r = _ollama_post(settings, {"messages": messages}, stream=True, num_ctx=num_ctx)
-    for line in r.iter_lines():
-        if not line:
-            continue
-        data = json.loads(line)
-        if "error" in data:
-            raise SummarizerError(f"Ollama error: {data['error']}")
-        text = data.get("message", {}).get("content", "")
-        if text:
-            yield text
-        if data.get("done"):
-            break
+    try:
+        for line in r.iter_lines():
+            if not line:
+                continue
+            data = json.loads(line)
+            if "error" in data:
+                raise SummarizerError(f"Ollama error: {data['error']}")
+            text = data.get("message", {}).get("content", "")
+            if text:
+                yield text
+            if data.get("done"):
+                if data.get("done_reason") == "length":
+                    yield "\n\n[Stopped: the answer hit the length limit.]"
+                break
+    finally:
+        r.close()  # Stop in the page: closing the connection makes Ollama stop generating
 
 
 def ollama_free_gpu(settings):

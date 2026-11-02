@@ -10,7 +10,9 @@ import re
 import socket
 import sys
 import threading
+import time
 import webbrowser
+import zlib
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 
@@ -172,28 +174,43 @@ def speaker(tracks, start, end):
     return None
 
 
-prewarm = {"status": "", "meeting": None}
+# What Ollama has read in advance: status "", "reading" or "ready"; key = which meeting and text.
+prewarm = {"status": "", "meeting": None, "key": None, "at": 0.0}
+prewarm_lock = threading.Lock()
 
 
 def start_prewarm(meeting):
-    """Once a transcript is complete, have Ollama read it in the background."""
+    """Have Ollama read a complete transcript in the background, so answers start in seconds.
+    Runs after a recording or upload finishes and when the user clicks into the request box;
+    skipped if that exact text is already being read or was read recently."""
     settings = config.load()
-    if settings["provider"] != "ollama" or len(meeting.transcript) > summarizer.SINGLE_PASS_CHARS:
+    if settings["provider"] != "ollama":
         return
     with lock:
-        if meeting is not current or meeting.recorder or meeting.pending or not meeting.transcript.strip():
+        if (meeting is not current or meeting.recorder or meeting.pending or meeting.stopping
+                or not meeting.transcript.strip()):
             return
         transcript, context = meeting.transcript, meeting.context
     system = summarizer.system_prompt(memory.prompt_section(memory.load()))
+    if not summarizer.fits_single_pass(system, transcript, context):
+        return
+    key = (meeting.id, zlib.crc32(f"{settings['ollama_model']}\n{system}\n{context}\n{transcript}".encode()))
+    with prewarm_lock:
+        fresh = time.time() - prewarm["at"] < 14 * 60  # PREWARM_KEEP_ALIVE is 15 min
+        if prewarm["key"] == key and (prewarm["status"] == "reading" or (prewarm["status"] == "ready" and fresh)):
+            return
+        prewarm.update(status="reading", meeting=meeting.id, key=key)
 
     def run():
-        prewarm.update(status="reading", meeting=meeting.id)
         try:
             transcriber.unload()  # Whisper is done; give Ollama the GPU
             summarizer.ollama_prewarm(settings, system, transcript, context)
-            prewarm["status"] = "ready"
+            status = "ready"
         except summarizer.SummarizerError:
-            prewarm["status"] = ""  # Ollama not running: the first request reports it
+            status = ""  # Ollama not running: the first request reports it
+        with prewarm_lock:
+            if prewarm["key"] == key:
+                prewarm.update(status=status, at=time.time())
 
     threading.Thread(target=run, daemon=True).start()
 
@@ -208,7 +225,8 @@ def transcribe_job(meeting, source, offset, is_file, tracks):
     freed = summarizer.ollama_free_gpu(settings)  # transcription gets the GPU first
     if freed:
         log.info("Unloaded %s from Ollama to give Whisper the GPU", ", ".join(freed))
-        prewarm["status"] = ""
+        with prewarm_lock:
+            prewarm.update(status="", key=None)
     by_voice = settings["speaker_labels"]
     if by_voice and is_file:
         source = decode_audio(source, sampling_rate=speakers.RATE)  # need the samples for voiceprints
@@ -286,13 +304,18 @@ def index():
 
 @app.get("/api/state")
 def state():
+    """Polled every second. The transcript (~55 KB for an hour) and the speaker list are
+    sent only when they changed since the page's last copy (?t=<transcript_key>)."""
     with lock:
         m = current
+        key = f"{m.id}:{zlib.crc32(m.transcript.encode())}"
+        changed = request.args.get("t") != key
         return jsonify({
             "id": m.id,
             "title": m.title,
             "context": m.context,
-            "transcript": m.transcript,
+            "transcript_key": key,
+            **({"transcript": m.transcript, "speakers": speaker_list(m)} if changed else {}),
             "history": [{"role": t["role"], "text": t["display"]} for t in m.history],
             "recording": m.recorder is not None,
             "record_seconds": m.recorder.seconds if m.recorder else 0,
@@ -301,7 +324,6 @@ def state():
             "levels": m.recorder.levels() if m.recorder else {},
             "pending": m.pending,
             "copied": m.copied_transcript is not None,
-            "speakers": speaker_list(m),
             "voice_error": tagger.error,
             "prewarm": prewarm["status"] if prewarm["meeting"] == m.id else "",
             "error": m.error,
@@ -320,6 +342,8 @@ def update_meeting():
             return error("Wait for recording and transcription to finish before editing.")
         for k in ("title", "context", "transcript"):
             if k in data:
+                if not isinstance(data[k], str):  # anything else would break every later poll
+                    return error(f"{k} must be text.")
                 setattr(m, k, data[k])
         m.error = ""
         m.save()
@@ -408,6 +432,13 @@ def open_meeting():
             current = Meeting.load(secure_filename(request.get_json()["id"]))
         except (OSError, ValueError, KeyError):
             return error("Couldn't open that meeting.")
+    return jsonify(ok=True)
+
+
+@app.post("/api/prewarm")
+def request_prewarm():
+    """The page calls this when the user clicks into the request box or picks a preset:
+    likely about to ask, so have Ollama start reading now (no-op if already read)."""
     start_prewarm(current)
     return jsonify(ok=True)
 
@@ -534,6 +565,7 @@ def ask():
             yield f"\n\n[Unexpected error: {e}]"
             return
         finally:
+            source.close()  # Stop in the page drops the connection: stop Ollama/Claude right away
             with lock:
                 m.save()  # keeps Ollama's section notes even if the final answer failed
         with lock:
